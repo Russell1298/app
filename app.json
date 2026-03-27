@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "ScheduleApp",
+    "slug": "schedule-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "scheduleapp",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#031b4e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourname.scheduleapp"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#031b4e"
+      },
+      "package": "com.yourname.scheduleapp"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
