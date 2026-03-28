@@ -11,13 +11,13 @@ import {
   Calendar
 } from "lucide-react-native";
 import { router } from "expo-router";
-import { Colors } from "@/constants/Colors";
+import { KeystoneLogo } from "@/components/ui/KeystoneLogo";
 
 const MENU_SECTIONS = [
   {
     title: "Account",
     items: [
-      { icon: Mail, label: "Email Preferences", accent: Colors.primary },
+      { icon: Mail, label: "Email Preferences", accent: "#0069ff" },
       { icon: Bell, label: "Notifications", accent: "#7c3aed" },
       { icon: Shield, label: "Privacy & Security", accent: "#059669" },
       { icon: Calendar, label: "Calendar Sync", accent: "#d97706" }
@@ -33,50 +33,69 @@ const MENU_SECTIONS = [
 
 export default function ProfileScreen() {
   return (
-    <SafeAreaView
-      className="flex-1"
-      style={{ backgroundColor: Colors.background }}
-      edges={["top"]}
-    >
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#f3f5f9" }} edges={["top"]}>
       {/* Header */}
       <View
-        className="px-5 py-4 bg-white"
-        style={{ borderBottomWidth: 1, borderBottomColor: "#f1f5f9" }}
+        style={{
+          backgroundColor: "#fff",
+          paddingHorizontal: 20,
+          paddingVertical: 16,
+          borderBottomWidth: 1,
+          borderBottomColor: "#f1f5f9"
+        }}
       >
-        <Text
-          className="text-xl font-bold"
-          style={{ color: Colors.slate.dark }}
-        >
+        <Text style={{ fontSize: 22, fontWeight: "800", color: "#031b4e", letterSpacing: -0.4 }}>
           Profile
         </Text>
       </View>
 
-      <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
-        {/* Avatar card */}
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+        {/* Avatar hero card */}
         <View
-          className="mx-4 mt-4 mb-4 bg-white rounded-2xl p-6 items-center"
-          style={{ elevation: 2, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 8 }}
+          style={{
+            margin: 16,
+            backgroundColor: "#0069ff",
+            borderRadius: 20,
+            padding: 24,
+            alignItems: "center",
+            elevation: 3,
+            shadowColor: "#0069ff",
+            shadowOpacity: 0.25,
+            shadowRadius: 10
+          }}
         >
+          <KeystoneLogo size={56} light />
+
           <View
-            className="w-20 h-20 rounded-full items-center justify-center mb-3"
-            style={{ backgroundColor: Colors.primary }}
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              backgroundColor: "rgba(255,255,255,0.2)",
+              alignItems: "center",
+              justifyContent: "center",
+              marginTop: 16,
+              marginBottom: 10
+            }}
           >
-            <User color="white" size={36} />
+            <User color="white" size={30} />
           </View>
-          <Text
-            className="text-lg font-bold"
-            style={{ color: Colors.slate.dark }}
-          >
+          <Text style={{ color: "#fff", fontSize: 18, fontWeight: "800" }}>
             Jane Smith
           </Text>
-          <Text className="text-sm mt-0.5" style={{ color: Colors.text.muted }}>
+          <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginTop: 2 }}>
             jane@example.com
           </Text>
 
-          {/* Stats row */}
+          {/* Stats */}
           <View
-            className="flex-row mt-5 w-full rounded-xl overflow-hidden"
-            style={{ backgroundColor: Colors.background }}
+            style={{
+              flexDirection: "row",
+              marginTop: 20,
+              backgroundColor: "rgba(255,255,255,0.15)",
+              borderRadius: 12,
+              width: "100%"
+            }}
           >
             {[
               { label: "Schedules", value: "12" },
@@ -85,19 +104,18 @@ export default function ProfileScreen() {
             ].map((stat, i, arr) => (
               <View
                 key={stat.label}
-                className="flex-1 py-3 items-center"
                 style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  alignItems: "center",
                   borderRightWidth: i < arr.length - 1 ? 1 : 0,
-                  borderRightColor: Colors.border
+                  borderRightColor: "rgba(255,255,255,0.2)"
                 }}
               >
-                <Text
-                  className="text-lg font-bold"
-                  style={{ color: Colors.primary }}
-                >
+                <Text style={{ color: "#fff", fontSize: 20, fontWeight: "800" }}>
                   {stat.value}
                 </Text>
-                <Text className="text-xs mt-0.5" style={{ color: Colors.text.muted }}>
+                <Text style={{ color: "rgba(255,255,255,0.65)", fontSize: 11, marginTop: 2 }}>
                   {stat.label}
                 </Text>
               </View>
@@ -105,13 +123,17 @@ export default function ProfileScreen() {
           </View>
 
           <TouchableOpacity
-            className="mt-4 px-6 py-2 rounded-full"
-            style={{ borderWidth: 1.5, borderColor: Colors.primary }}
+            style={{
+              marginTop: 16,
+              paddingHorizontal: 24,
+              paddingVertical: 9,
+              borderRadius: 20,
+              backgroundColor: "rgba(255,255,255,0.2)",
+              borderWidth: 1,
+              borderColor: "rgba(255,255,255,0.4)"
+            }}
           >
-            <Text
-              className="text-sm font-semibold"
-              style={{ color: Colors.primary }}
-            >
+            <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>
               Edit Profile
             </Text>
           </TouchableOpacity>
@@ -119,35 +141,60 @@ export default function ProfileScreen() {
 
         {/* Menu sections */}
         {MENU_SECTIONS.map((section) => (
-          <View key={section.title} className="mx-4 mb-4">
+          <View key={section.title} style={{ marginHorizontal: 16, marginBottom: 12 }}>
             <Text
-              className="text-xs font-semibold uppercase tracking-widest mb-2 px-1"
-              style={{ color: Colors.text.muted }}
+              style={{
+                fontSize: 11,
+                fontWeight: "700",
+                color: "#9ca3af",
+                textTransform: "uppercase",
+                letterSpacing: 1,
+                marginBottom: 8,
+                paddingLeft: 4
+              }}
             >
               {section.title}
             </Text>
             <View
-              className="bg-white rounded-2xl overflow-hidden"
-              style={{ elevation: 2, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 8 }}
+              style={{
+                backgroundColor: "#fff",
+                borderRadius: 16,
+                overflow: "hidden",
+                elevation: 1,
+                shadowColor: "#000",
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                borderWidth: 1,
+                borderColor: "#f1f5f9"
+              }}
             >
               {section.items.map((item, index) => (
                 <TouchableOpacity
                   key={item.label}
-                  className="flex-row items-center px-4 py-4"
                   style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
                     borderBottomWidth: index < section.items.length - 1 ? 1 : 0,
                     borderBottomColor: "#f1f5f9"
                   }}
                 >
                   <View
-                    className="w-8 h-8 rounded-lg items-center justify-center mr-3"
-                    style={{ backgroundColor: `${item.accent}18` }}
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 10,
+                      backgroundColor: `${item.accent}18`,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: 12
+                    }}
                   >
                     <item.icon color={item.accent} size={16} />
                   </View>
                   <Text
-                    className="flex-1 text-sm font-medium"
-                    style={{ color: Colors.slate.dark }}
+                    style={{ flex: 1, fontSize: 14, fontWeight: "600", color: "#031b4e" }}
                   >
                     {item.label}
                   </Text>
@@ -159,16 +206,36 @@ export default function ProfileScreen() {
         ))}
 
         {/* Sign out */}
-        <View className="mx-4 mb-10">
+        <View style={{ marginHorizontal: 16, marginBottom: 32 }}>
           <TouchableOpacity
-            className="bg-white rounded-2xl px-4 py-4 flex-row items-center"
-            style={{ elevation: 2, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 8 }}
             onPress={() => router.replace("/(auth)/sign-in")}
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 16,
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              flexDirection: "row",
+              alignItems: "center",
+              borderWidth: 1,
+              borderColor: "#fee2e2"
+            }}
           >
-            <View className="w-8 h-8 rounded-lg items-center justify-center mr-3 bg-red-50">
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                backgroundColor: "#fef2f2",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 12
+              }}
+            >
               <LogOut color="#ef4444" size={16} />
             </View>
-            <Text className="text-sm font-semibold text-red-500">Sign Out</Text>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: "#ef4444" }}>
+              Sign Out
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

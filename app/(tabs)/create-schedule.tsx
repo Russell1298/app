@@ -11,9 +11,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker, {
   DateTimePickerEvent
 } from "@react-native-community/datetimepicker";
-import { Calendar, Clock, Tag, AlignLeft } from "lucide-react-native";
+import { Calendar, Clock, Tag, AlignLeft, CheckCircle2 } from "lucide-react-native";
 import { Input } from "@/components/ui/Input";
-import { Button } from "@/components/ui/Button";
 import { Colors } from "@/constants/Colors";
 
 const DURATION_OPTIONS = [
@@ -25,12 +24,19 @@ const DURATION_OPTIONS = [
   "2 hr"
 ];
 
+const TYPE_OPTIONS = [
+  { label: "One-time", color: "#0069ff" },
+  { label: "Recurring", color: "#7c3aed" },
+  { label: "Team", color: "#059669" }
+];
+
 export default function CreateScheduleScreen() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState(new Date());
   const [time, setTime] = useState(new Date());
   const [duration, setDuration] = useState("30 min");
+  const [type, setType] = useState("One-time");
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -70,64 +76,119 @@ export default function CreateScheduleScreen() {
       setLoading(false);
       Alert.alert("Schedule Created", `"${title}" has been added.`, [
         {
-          text: "OK",
+          text: "Done",
           onPress: () => {
             setTitle("");
             setDescription("");
             setDate(new Date());
             setTime(new Date());
             setDuration("30 min");
+            setType("One-time");
           }
         }
       ]);
     }, 800);
   };
 
-  return (
-    <SafeAreaView
-      className="flex-1"
-      style={{ backgroundColor: Colors.background }}
-      edges={["top"]}
+  const Section = ({ title: t, children }: { title: string; children: React.ReactNode }) => (
+    <View
+      style={{
+        backgroundColor: "#fff",
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 12,
+        elevation: 1,
+        shadowColor: "#000",
+        shadowOpacity: 0.04,
+        shadowRadius: 6,
+        borderWidth: 1,
+        borderColor: "#f1f5f9"
+      }}
     >
+      <Text
+        style={{
+          fontSize: 11,
+          fontWeight: "700",
+          color: "#9ca3af",
+          textTransform: "uppercase",
+          letterSpacing: 1,
+          marginBottom: 14
+        }}
+      >
+        {t}
+      </Text>
+      {children}
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#f3f5f9" }} edges={["top"]}>
       {/* Header */}
       <View
-        className="px-5 py-4 bg-white"
-        style={{ borderBottomWidth: 1, borderBottomColor: "#f1f5f9" }}
+        style={{
+          backgroundColor: "#fff",
+          paddingHorizontal: 20,
+          paddingVertical: 16,
+          borderBottomWidth: 1,
+          borderBottomColor: "#f1f5f9"
+        }}
       >
-        <Text
-          className="text-xl font-bold"
-          style={{ color: Colors.slate.dark }}
-        >
+        <Text style={{ fontSize: 22, fontWeight: "800", color: "#031b4e", letterSpacing: -0.4 }}>
           New Schedule
         </Text>
-        <Text className="text-xs mt-0.5" style={{ color: Colors.text.muted }}>
+        <Text style={{ fontSize: 12, color: "#6b7280", marginTop: 1 }}>
           Fill in the details below
         </Text>
       </View>
 
       <ScrollView
-        className="flex-1"
+        style={{ flex: 1 }}
         contentContainerStyle={{ padding: 16 }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Details card */}
-        <View
-          className="bg-white rounded-2xl p-5 mb-4"
-          style={{ elevation: 2, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 8 }}
-        >
-          <Text
-            className="text-sm font-semibold mb-4"
-            style={{ color: Colors.slate.dark }}
-          >
-            Details
-          </Text>
+        {/* Type selector */}
+        <Section title="Schedule Type">
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {TYPE_OPTIONS.map((opt) => {
+              const selected = type === opt.label;
+              return (
+                <TouchableOpacity
+                  key={opt.label}
+                  onPress={() => setType(opt.label)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    alignItems: "center",
+                    backgroundColor: selected ? opt.color : "#f3f5f9",
+                    borderWidth: selected ? 0 : 1,
+                    borderColor: "#e5e7eb"
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "700",
+                      color: selected ? "#fff" : "#6b7280"
+                    }}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </Section>
+
+        {/* Details */}
+        <Section title="Details">
           <Input
             label="Title"
             placeholder="e.g. Team Standup"
             value={title}
             onChangeText={setTitle}
-            icon={<Tag color="#6b7280" size={17} />}
+            icon={<Tag color="#6b7280" size={16} />}
           />
           <Input
             label="Description"
@@ -137,63 +198,55 @@ export default function CreateScheduleScreen() {
             multiline
             numberOfLines={3}
             textAlignVertical="top"
-            icon={<AlignLeft color="#6b7280" size={17} />}
+            icon={<AlignLeft color="#6b7280" size={16} />}
           />
-        </View>
+        </Section>
 
-        {/* Date & Time card */}
-        <View
-          className="bg-white rounded-2xl p-5 mb-4"
-          style={{ elevation: 2, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 8 }}
-        >
-          <Text
-            className="text-sm font-semibold mb-4"
-            style={{ color: Colors.slate.dark }}
-          >
-            Date & Time
-          </Text>
-
-          {/* Date trigger */}
+        {/* Date & Time */}
+        <Section title="Date & Time">
           <TouchableOpacity
             onPress={() => setShowDatePicker(true)}
-            className="flex-row items-center rounded-xl px-4 mb-3"
             style={{
-              paddingVertical: 14,
+              flexDirection: "row",
+              alignItems: "center",
+              backgroundColor: "#f3f5f9",
+              borderRadius: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 13,
+              marginBottom: 10,
               borderWidth: 1,
-              borderColor: "#e5e7eb",
-              backgroundColor: "#f9fafb"
+              borderColor: "#e5e7eb"
             }}
           >
-            <Calendar color={Colors.primary} size={17} />
+            <Calendar color="#0069ff" size={16} />
             <Text
-              className="ml-3 text-sm font-medium"
-              style={{ color: Colors.slate.dark }}
+              style={{ marginLeft: 10, fontSize: 14, fontWeight: "600", color: "#031b4e" }}
             >
               {formatDate(date)}
             </Text>
           </TouchableOpacity>
 
-          {/* Time trigger */}
           <TouchableOpacity
             onPress={() => setShowTimePicker(true)}
-            className="flex-row items-center rounded-xl px-4"
             style={{
-              paddingVertical: 14,
+              flexDirection: "row",
+              alignItems: "center",
+              backgroundColor: "#f3f5f9",
+              borderRadius: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 13,
               borderWidth: 1,
-              borderColor: "#e5e7eb",
-              backgroundColor: "#f9fafb"
+              borderColor: "#e5e7eb"
             }}
           >
-            <Clock color={Colors.primary} size={17} />
+            <Clock color="#0069ff" size={16} />
             <Text
-              className="ml-3 text-sm font-medium"
-              style={{ color: Colors.slate.dark }}
+              style={{ marginLeft: 10, fontSize: 14, fontWeight: "600", color: "#031b4e" }}
             >
               {formatTime(time)}
             </Text>
           </TouchableOpacity>
 
-          {/* Pickers (shown inline on iOS, modal on Android) */}
           {showDatePicker && (
             <DateTimePicker
               value={date}
@@ -211,45 +264,68 @@ export default function CreateScheduleScreen() {
               onChange={onTimeChange}
             />
           )}
-        </View>
+        </Section>
 
-        {/* Duration card */}
-        <View
-          className="bg-white rounded-2xl p-5 mb-6"
-          style={{ elevation: 2, shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 8 }}
-        >
-          <Text
-            className="text-sm font-semibold mb-4"
-            style={{ color: Colors.slate.dark }}
-          >
-            Duration
-          </Text>
-          <View className="flex-row flex-wrap gap-2">
-            {DURATION_OPTIONS.map((opt) => (
-              <TouchableOpacity
-                key={opt}
-                onPress={() => setDuration(opt)}
-                className="px-4 py-2 rounded-full"
-                style={{
-                  borderWidth: 1.5,
-                  borderColor: duration === opt ? Colors.primary : "#e5e7eb",
-                  backgroundColor: duration === opt ? Colors.primary : "#fff"
-                }}
-              >
-                <Text
-                  className="text-sm font-semibold"
-                  style={{ color: duration === opt ? "#fff" : "#6b7280" }}
+        {/* Duration */}
+        <Section title="Duration">
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {DURATION_OPTIONS.map((opt) => {
+              const selected = duration === opt;
+              return (
+                <TouchableOpacity
+                  key={opt}
+                  onPress={() => setDuration(opt)}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 9,
+                    borderRadius: 20,
+                    backgroundColor: selected ? "#0069ff" : "#f3f5f9",
+                    borderWidth: 1,
+                    borderColor: selected ? "#0069ff" : "#e5e7eb"
+                  }}
                 >
-                  {opt}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "700",
+                      color: selected ? "#fff" : "#6b7280"
+                    }}
+                  >
+                    {opt}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
-        </View>
+        </Section>
 
-        <Button title="Create Schedule" onPress={handleCreate} loading={loading} />
+        {/* Submit */}
+        <TouchableOpacity
+          onPress={handleCreate}
+          disabled={loading}
+          style={{
+            backgroundColor: "#0069ff",
+            borderRadius: 14,
+            paddingVertical: 16,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            marginTop: 4,
+            opacity: loading ? 0.7 : 1,
+            elevation: 3,
+            shadowColor: "#0069ff",
+            shadowOpacity: 0.3,
+            shadowRadius: 8
+          }}
+        >
+          <CheckCircle2 color="#fff" size={18} />
+          <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
+            {loading ? "Creating…" : "Create Schedule"}
+          </Text>
+        </TouchableOpacity>
 
-        <View className="h-6" />
+        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );

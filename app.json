@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "ScheduleApp",
-    "slug": "schedule-app",
+    "name": "Keystone",
+    "slug": "keystone",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "scheduleapp",
+    "scheme": "keystone",
     "userInterfaceStyle": "light",
     "splash": {
       "resizeMode": "contain",
