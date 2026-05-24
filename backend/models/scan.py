@@ -48,5 +48,28 @@ class HeaderScanResult(BaseModel):
     summary: dict
 
 
+class DNSRecord(BaseModel):
+    record_type: str
+    values: list[str]
+
+
+class DNSFinding(BaseModel):
+    check: str
+    status: Literal["pass", "fail", "warn", "info"]
+    severity: Literal["low", "medium", "high"] | None
+    description: str
+    remediation: str | None
+
+
+class DNSScanResult(BaseModel):
+    domain: str
+    scan_timestamp: str
+    records: list[DNSRecord]
+    findings: list[DNSFinding]
+    risk_score: int
+    risk_level: Literal["low", "medium", "high", "critical"]
+    summary: dict
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
