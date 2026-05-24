@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Security Assessment — {{ result.domain }}</title>
+<style>
+  /* ── Reset & base ─────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #1a202c;
+    background: #ffffff;
+  }
+
+  /* ── Layout helpers ───────────────────────────────────── */
+  .page          { padding: 0; }
+  .page-break    { page-break-before: always; }
+  .section       { margin-bottom: 28px; }
+  .two-col       { display: flex; gap: 24px; }
+  .two-col > *   { flex: 1; }
+
+  /* ── Cover ────────────────────────────────────────────── */
+  .cover {
+    background: linear-gradient(145deg, #0f2d5a 0%, #1a4480 100%);
+    color: #ffffff;
+    padding: 60px 56px 48px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .cover-logo {
+    font-size: 13pt;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.85;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cover-logo-icon {
+    width: 22px;
+    height: 22px;
+    background: #38bdf8;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11pt;
+  }
+  .cover-main { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .cover-label {
+    font-size: 9pt;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    opacity: 0.6;
+    margin-bottom: 12px;
+  }
+  .cover-domain {
+    font-size: 32pt;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    word-break: break-all;
+    margin-bottom: 16px;
+  }
+  .cover-badge {
+    display: inline-block;
+    padding: 5px 18px;
+    border-radius: 20px;
+    font-size: 11pt;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    width: fit-content;
+  }
+  .badge-low      { background: #166534; color: #bbf7d0; }
+  .badge-medium   { background: #92400e; color: #fde68a; }
+  .badge-high     { background: #9a3412; color: #fed7aa; }
+  .badge-critical { background: #7f1d1d; color: #fecaca; }
+
+  .cover-meta {
+    border-top: 1px solid rgba(255,255,255,0.2);
+    padding-top: 20px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9pt;
+    opacity: 0.65;
+  }
+
+  /* ── Content pages ────────────────────────────────────── */
+  .content { padding: 44px 56px; }
+
+  /* ── Section headings ─────────────────────────────────── */
+  .section-title {
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #64748b;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 6px;
+    margin-bottom: 16px;
+  }
+  h2 {
+    font-size: 16pt;
+    font-weight: 800;
+    color: #0f2d5a;
+    margin-bottom: 4px;
+  }
+  h3 {
+    font-size: 12pt;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 10px;
+  }
+
+  /* ── Executive summary ────────────────────────────────── */
+  .exec-grid { display: flex; gap: 32px; align-items: flex-start; }
+
+  .score-circle {
+    flex-shrink: 0;
+    width: 120px;
+    text-align: center;
+  }
+  .score-ring {
+    position: relative;
+    display: inline-block;
+  }
+  .score-ring svg { display: block; }
+  .score-number {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 22pt;
+    line-height: 1;
+  }
+  .score-number small { font-size: 8pt; font-weight: 400; color: #94a3b8; }
+  .score-label {
+    font-size: 8pt;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-top: 6px;
+  }
+
+  .exec-text { flex: 1; }
+  .exec-summary-para {
+    font-size: 10.5pt;
+    color: #334155;
+    line-height: 1.65;
+    margin-bottom: 16px;
+  }
+
+  /* ── Scanner score cards ──────────────────────────────── */
+  .score-cards { display: flex; gap: 12px; margin-top: 20px; }
+  .score-card {
+    flex: 1;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 10px;
+    text-align: center;
+  }
+  .score-card-label { font-size: 7.5pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.1em; }
+  .score-card-value { font-size: 20pt; font-weight: 800; color: #0f2d5a; margin: 2px 0; }
+  .score-card-badge { display: inline-block; font-size: 7pt; font-weight: 700; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .badge-sm-low      { background: #dcfce7; color: #166534; }
+  .badge-sm-medium   { background: #fef9c3; color: #854d0e; }
+  .badge-sm-high     { background: #ffedd5; color: #9a3412; }
+  .badge-sm-critical { background: #fee2e2; color: #7f1d1d; }
+
+  /* ── Tech stack ───────────────────────────────────────── */
+  .tech-pill {
+    display: inline-block;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 14px;
+    padding: 3px 12px;
+    font-size: 9pt;
+    color: #334155;
+    margin: 3px 4px 3px 0;
+    font-weight: 500;
+  }
+  .tech-category { font-size: 8pt; color: #94a3b8; margin-right: 4px; }
+
+  /* ── Findings ─────────────────────────────────────────── */
+  .finding {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .finding-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 16px;
+    gap: 12px;
+  }
+  .finding-high     .finding-header { background: #fff5f5; border-left: 4px solid #dc2626; }
+  .finding-medium   .finding-header { background: #fffbeb; border-left: 4px solid #d97706; }
+  .finding-low      .finding-header { background: #eff6ff; border-left: 4px solid #3b82f6; }
+  .finding-info     .finding-header { background: #f8fafc; border-left: 4px solid #94a3b8; }
+
+  .finding-title { font-weight: 700; font-size: 10.5pt; color: #0f172a; flex: 1; }
+  .finding-scanner { font-size: 8pt; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; }
+
+  .severity-badge {
+    font-size: 7.5pt;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+  .sev-high     { background: #fee2e2; color: #b91c1c; }
+  .sev-medium   { background: #fef3c7; color: #b45309; }
+  .sev-low      { background: #dbeafe; color: #1d4ed8; }
+  .sev-info     { background: #f1f5f9; color: #475569; }
+
+  .finding-body { padding: 14px 16px; background: #ffffff; }
+  .finding-body p { margin-bottom: 8px; font-size: 10pt; color: #334155; line-height: 1.6; }
+  .finding-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #94a3b8; margin-bottom: 3px; }
+  .finding-fix {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 10px 13px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 9pt;
+    color: #0f2d5a;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-top: 4px;
+  }
+  .effort-badge {
+    display: inline-block;
+    font-size: 8pt;
+    padding: 2px 10px;
+    border-radius: 10px;
+    margin-top: 6px;
+    background: #f1f5f9;
+    color: #475569;
+    font-weight: 600;
+  }
+
+  /* ── Remediation roadmap ──────────────────────────────── */
+  .roadmap-phase {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .roadmap-phase-header {
+    padding: 10px 16px;
+    font-weight: 700;
+    font-size: 10pt;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .phase-immediate { background: #fef2f2; color: #991b1b; }
+  .phase-short     { background: #fffbeb; color: #92400e; }
+  .phase-ongoing   { background: #f0fdf4; color: #166534; }
+  .roadmap-phase-body { padding: 12px 16px; background: #fff; }
+  .roadmap-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 8px;
+    font-size: 10pt;
+    color: #334155;
+  }
+  .roadmap-num {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #0f2d5a;
+    color: #fff;
+    font-size: 8pt;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── Appendix tables ──────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-bottom: 16px; }
+  th { background: #f1f5f9; color: #475569; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 10px; text-align: left; border-bottom: 2px solid #e2e8f0; }
+  td { padding: 7px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; word-break: break-all; }
+  tr:last-child td { border-bottom: none; }
+  .mono { font-family: 'Courier New', Courier, monospace; }
+
+  /* ── Status icons ─────────────────────────────────────── */
+  .icon-pass { color: #16a34a; font-weight: 700; }
+  .icon-fail { color: #dc2626; font-weight: 700; }
+  .icon-warn { color: #d97706; font-weight: 700; }
+  .icon-info { color: #94a3b8; }
+
+  /* ── Footer ───────────────────────────────────────────── */
+  .footer {
+    background: #0f2d5a;
+    color: rgba(255,255,255,0.5);
+    padding: 18px 56px;
+    font-size: 8pt;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .footer strong { color: rgba(255,255,255,0.8); }
+
+  /* ── Print ────────────────────────────────────────────── */
+  @media print {
+    body { font-size: 10pt; }
+    .page-break { page-break-before: always; }
+    .no-print { display: none !important; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ── Screen only extras ───────────────────────────────── */
+  @media screen {
+    body { background: #e5e7eb; }
+    .report-wrap { max-width: 900px; margin: 32px auto; box-shadow: 0 4px 32px rgba(0,0,0,0.18); background: #fff; border-radius: 4px; overflow: hidden; }
+    .print-btn {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      background: #0f2d5a;
+      color: #fff;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 11pt;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+      z-index: 999;
+    }
+    .print-btn:hover { background: #1a4480; }
+  }
+</style>
+</head>
+<body>
+
+<button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
+
+<div class="report-wrap">
+
+<!-- ══════════════════════════════════════════════════════════
+     COVER PAGE
+══════════════════════════════════════════════════════════ -->
+<div class="cover">
+  <div class="cover-logo">
+    <span class="cover-logo-icon">🛡</span>
+    SiteGuard Security
+  </div>
+
+  <div class="cover-main">
+    <div class="cover-label">Website Security Assessment Report</div>
+    <div class="cover-domain">{{ result.domain }}</div>
+    <span class="cover-badge badge-{{ result.overall_risk_level }}">
+      {{ result.overall_risk_level | upper }} RISK
+    </span>
+  </div>
+
+  <div class="cover-meta">
+    <span>{% if client_name %}Prepared for: <strong style="opacity:0.9">{{ client_name }}</strong>{% endif %}</span>
+    <span>Date: <strong style="opacity:0.9">{{ scan_date }}</strong></span>
+    {% if result.scan_id %}<span>Report ID: {{ result.scan_id[:8] }}</span>{% endif %}
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE 2 — EXECUTIVE SUMMARY
+══════════════════════════════════════════════════════════ -->
+<div class="content page-break">
+
+  <div class="section">
+    <div class="section-title">Executive Summary</div>
+
+    <div class="exec-grid">
+      <!-- Score ring (SVG) -->
+      <div class="score-circle">
+        {% set score = result.overall_risk_score %}
+        {% set r = 44 %}
+        {% set circ = 2 * 3.14159 * r %}
+        {% set offset = circ - (score / 100) * circ %}
+        {% set ring_color = {'low':'#16a34a','medium':'#d97706','high':'#ea580c','critical':'#dc2626'}[result.overall_risk_level] %}
+        <div class="score-ring">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <circle cx="55" cy="55" r="{{ r }}" fill="none" stroke="#e2e8f0" stroke-width="9"/>
+            <circle cx="55" cy="55" r="{{ r }}" fill="none"
+              stroke="{{ ring_color }}" stroke-width="9"
+              stroke-linecap="round"
+              stroke-dasharray="{{ circ }}"
+              stroke-dashoffset="{{ offset }}"
+              transform="rotate(-90 55 55)"/>
+          </svg>
+          <div class="score-number" style="color:{{ ring_color }}">
+            {{ score }}<small>/100</small>
+          </div>
+        </div>
+        <div class="score-label">Overall Risk</div>
+      </div>
+
+      <!-- Summary text -->
+      <div class="exec-text">
+        <p class="exec-summary-para">{{ executive_summary }}</p>
+        {% if result.fingerprint.matches %}
+        <div class="finding-label" style="margin-bottom:6px">Detected technology stack</div>
+        <div>
+          {% for m in result.fingerprint.matches %}
+          <span class="tech-pill">{{ m.name }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Per-scanner score cards -->
+    <div class="score-cards">
+      {% for label, score, level in scanner_scores %}
+      <div class="score-card">
+        <div class="score-card-label">{{ label }}</div>
+        <div class="score-card-value">{{ score }}</div>
+        <span class="score-card-badge badge-sm-{{ level }}">{{ level }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Key statistics -->
+  <div class="section">
+    <div class="section-title">Assessment at a Glance</div>
+    <table>
+      <tr>
+        <th>Category</th>
+        <th>Findings</th>
+        <th>Highest Severity</th>
+        <th>Status</th>
+      </tr>
+      {% for row in glance_rows %}
+      <tr>
+        <td><strong>{{ row.category }}</strong></td>
+        <td>{{ row.count }} issue{{ 's' if row.count != 1 else '' }}</td>
+        <td>
+          {% if row.worst %}
+          <span class="severity-badge sev-{{ row.worst }}">{{ row.worst }}</span>
+          {% else %}
+          <span class="icon-pass">✓ Clear</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.worst in ('high', 'critical') %}
+          <span class="icon-fail">⚑ Action required</span>
+          {% elif row.worst == 'medium' %}
+          <span class="icon-warn">⚠ Review recommended</span>
+          {% elif row.worst == 'low' %}
+          <span class="icon-info">ℹ Minor issues</span>
+          {% else %}
+          <span class="icon-pass">✓ No issues</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE 3 — FINDINGS (HIGH / CRITICAL)
+══════════════════════════════════════════════════════════ -->
+{% if high_findings %}
+<div class="content page-break">
+  <div class="section">
+    <div class="section-title">High Priority Findings — Immediate Attention Required</div>
+    <p style="color:#64748b;font-size:9.5pt;margin-bottom:18px">
+      These issues represent the most significant security risks and should be addressed as a priority.
+    </p>
+    {% for f in high_findings %}
+    <div class="finding finding-{{ f.severity }}">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">{{ f.title }}</div>
+          <div class="finding-scanner">{{ f.scanner_label }}</div>
+        </div>
+        <span class="severity-badge sev-{{ f.severity }}">{{ f.severity | upper }}</span>
+      </div>
+      <div class="finding-body">
+        <div class="finding-label">What this means for your business</div>
+        <p>{{ f.business_impact }}</p>
+        {% if f.remediation %}
+        <div class="finding-label" style="margin-top:10px">How to fix it</div>
+        <div class="finding-fix">{{ f.remediation }}</div>
+        {% endif %}
+        <span class="effort-badge">⏱ Estimated effort: {{ f.effort }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE 4 — MEDIUM / LOW FINDINGS
+══════════════════════════════════════════════════════════ -->
+{% if medium_findings or low_findings %}
+<div class="content page-break">
+  {% if medium_findings %}
+  <div class="section">
+    <div class="section-title">Medium Priority Findings</div>
+    {% for f in medium_findings %}
+    <div class="finding finding-{{ f.severity }}">
+      <div class="finding-header">
+        <div>
+          <div class="finding-title">{{ f.title }}</div>
+          <div class="finding-scanner">{{ f.scanner_label }}</div>
+        </div>
+        <span class="severity-badge sev-{{ f.severity }}">{{ f.severity | upper }}</span>
+      </div>
+      <div class="finding-body">
+        <div class="finding-label">What this means for your business</div>
+        <p>{{ f.business_impact }}</p>
+        {% if f.remediation %}
+        <div class="finding-label" style="margin-top:10px">How to fix it</div>
+        <div class="finding-fix">{{ f.remediation }}</div>
+        {% endif %}
+        <span class="effort-badge">⏱ {{ f.effort }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if low_findings %}
+  <div class="section">
+    <div class="section-title">Low Priority / Informational</div>
+    <table>
+      <tr><th>Finding</th><th>Area</th><th>Effort to fix</th></tr>
+      {% for f in low_findings %}
+      <tr>
+        <td><strong>{{ f.title }}</strong><br><span style="color:#64748b;font-size:9pt">{{ f.business_impact }}</span></td>
+        <td>{{ f.scanner_label }}</td>
+        <td>{{ f.effort }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE 5 — REMEDIATION ROADMAP
+══════════════════════════════════════════════════════════ -->
+<div class="content page-break">
+  <div class="section">
+    <div class="section-title">Remediation Roadmap</div>
+    <p style="color:#64748b;font-size:9.5pt;margin-bottom:18px">
+      Prioritised action plan to address all identified vulnerabilities. Items are ordered by risk impact.
+    </p>
+
+    {% if roadmap.immediate %}
+    <div class="roadmap-phase">
+      <div class="roadmap-phase-header phase-immediate">
+        🚨 Immediate — Within 7 days
+      </div>
+      <div class="roadmap-phase-body">
+        {% for item in roadmap.immediate %}
+        <div class="roadmap-item">
+          <div class="roadmap-num">{{ loop.index }}</div>
+          <div>
+            <strong>{{ item.title }}</strong><br>
+            <span style="color:#64748b;font-size:9.5pt">{{ item.action }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if roadmap.short_term %}
+    <div class="roadmap-phase">
+      <div class="roadmap-phase-header phase-short">
+        ⚠ Short-term — Within 30 days
+      </div>
+      <div class="roadmap-phase-body">
+        {% for item in roadmap.short_term %}
+        <div class="roadmap-item">
+          <div class="roadmap-num" style="background:#d97706">{{ loop.index }}</div>
+          <div>
+            <strong>{{ item.title }}</strong><br>
+            <span style="color:#64748b;font-size:9.5pt">{{ item.action }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if roadmap.ongoing %}
+    <div class="roadmap-phase">
+      <div class="roadmap-phase-header phase-ongoing">
+        ✓ Ongoing improvements — Within 90 days
+      </div>
+      <div class="roadmap-phase-body">
+        {% for item in roadmap.ongoing %}
+        <div class="roadmap-item">
+          <div class="roadmap-num" style="background:#16a34a">{{ loop.index }}</div>
+          <div>
+            <strong>{{ item.title }}</strong><br>
+            <span style="color:#64748b;font-size:9.5pt">{{ item.action }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if not roadmap.immediate and not roadmap.short_term and not roadmap.ongoing %}
+    <p style="color:#16a34a;font-weight:600;text-align:center;padding:20px">
+      ✓ No critical remediation items identified. Continue monitoring regularly.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     PAGE 6 — TECHNICAL APPENDIX
+══════════════════════════════════════════════════════════ -->
+<div class="content page-break">
+  <div class="section">
+    <div class="section-title">Technical Appendix</div>
+  </div>
+
+  <!-- Security Headers -->
+  <div class="section">
+    <h3>Security Headers</h3>
+    <table>
+      <tr><th>Header</th><th>Status</th><th>Value</th></tr>
+      {% for f in result.headers.findings %}
+      <tr>
+        <td class="mono">{{ f.header }}</td>
+        <td>
+          {% if f.status == 'present' %}<span class="icon-pass">✓ Present</span>
+          {% elif f.status == 'missing' %}<span class="icon-fail">✗ Missing</span>
+          {% else %}<span class="icon-warn">⚠ Weak</span>{% endif %}
+        </td>
+        <td class="mono" style="font-size:8.5pt;color:#64748b">{{ f.value or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <!-- DNS Records -->
+  <div class="section">
+    <h3>DNS Records</h3>
+    <table>
+      <tr><th>Type</th><th>Values</th></tr>
+      {% for r in result.dns.records %}
+      <tr>
+        <td class="mono" style="white-space:nowrap;width:80px">{{ r.record_type }}</td>
+        <td class="mono" style="font-size:8.5pt">
+          {% for v in r.values[:6] %}{{ v }}<br>{% endfor %}
+          {% if r.values|length > 6 %}<span style="color:#94a3b8">+{{ r.values|length - 6 }} more</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <!-- SSL Certificate -->
+  {% if result.ssl.certificate %}
+  <div class="section">
+    <h3>SSL Certificate Details</h3>
+    {% set cert = result.ssl.certificate %}
+    <table>
+      <tr><th>Field</th><th>Value</th></tr>
+      <tr><td>Subject</td><td class="mono">{{ cert.subject }}</td></tr>
+      <tr><td>Issuer</td><td class="mono">{{ cert.issuer }}</td></tr>
+      <tr><td>Valid from</td><td class="mono">{{ cert.not_before }}</td></tr>
+      <tr><td>Valid until</td><td class="mono">{{ cert.not_after }}</td></tr>
+      <tr><td>Days remaining</td><td>{{ cert.days_until_expiry }}</td></tr>
+      <tr><td>Self-signed</td><td>{{ 'Yes ⚠' if cert.is_self_signed else 'No ✓' }}</td></tr>
+      <tr><td>Subject Alt Names</td><td class="mono">{{ cert.sans | join(', ') or '—' }}</td></tr>
+      <tr><td>Serial number</td><td class="mono">{{ cert.serial_number }}</td></tr>
+    </table>
+
+    <h3>TLS Version Support</h3>
+    <table>
+      <tr><th>Version</th><th>Supported</th><th>Assessment</th></tr>
+      {% for v in result.ssl.tls_versions %}
+      <tr>
+        <td class="mono">{{ v.version }}</td>
+        <td>{{ 'Yes' if v.supported else ('No' if v.supported == false else 'Unknown') }}</td>
+        <td>
+          {% if v.version in ('TLS 1.0', 'TLS 1.1') %}
+            {% if v.supported %}<span class="icon-fail">⚠ Should be disabled</span>
+            {% else %}<span class="icon-pass">✓ Correctly disabled</span>{% endif %}
+          {% else %}
+            {% if v.supported %}<span class="icon-pass">✓ Good</span>
+            {% else %}<span class="icon-warn">⚠ Consider enabling</span>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Exposure paths -->
+  <div class="section">
+    <h3>Paths Scanned</h3>
+    <table>
+      <tr><th>Path</th><th>Status Code</th><th>Result</th></tr>
+      {% for f in result.exposure.findings %}
+      <tr>
+        <td class="mono">{{ f.path }}</td>
+        <td class="mono">{{ f.status_code }}</td>
+        <td>
+          {% if f.exposed and f.status_code == 200 and f.severity != 'info' %}
+          <span class="icon-fail">⚑ Exposed — {{ f.severity }}</span>
+          {% elif f.exposed and f.status_code == 403 %}
+          <span class="icon-warn">Blocked (403)</span>
+          {% elif f.severity == 'info' %}
+          <span class="icon-info">ℹ Informational</span>
+          {% else %}
+          <span class="icon-pass">✓ Not found</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     FOOTER
+══════════════════════════════════════════════════════════ -->
+<div class="footer">
+  <span><strong>SiteGuard</strong> Website Security Assessment</span>
+  <span>Generated {{ scan_date }} · Passive scan only, no exploitation</span>
+  <span style="text-align:right;max-width:260px">
+    This report reflects the publicly visible security posture of {{ result.domain }} at the time of scanning.
+    It does not guarantee the absence of all vulnerabilities.
+  </span>
+</div>
+
+</div><!-- /report-wrap -->
+</body>
+</html>
