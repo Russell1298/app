@@ -71,6 +71,39 @@ class DNSScanResult(BaseModel):
     summary: dict
 
 
+class ExposureFinding(BaseModel):
+    path: str
+    label: str
+    status_code: int
+    exposed: bool
+    severity: Literal["low", "medium", "high", "info"]
+    description: str
+    remediation: str | None
+
+
+class ExposureScanResult(BaseModel):
+    domain: str
+    scan_timestamp: str
+    findings: list[ExposureFinding]
+    risk_score: int
+    risk_level: Literal["low", "medium", "high", "critical"]
+    summary: dict
+
+
+class FingerprintMatch(BaseModel):
+    name: str
+    category: Literal["cms", "framework", "cdn", "server", "library"]
+    confidence: Literal["low", "medium", "high"]
+    evidence: str
+
+
+class FingerprintScanResult(BaseModel):
+    domain: str
+    scan_timestamp: str
+    matches: list[FingerprintMatch]
+    summary: dict
+
+
 class CertInfo(BaseModel):
     subject: str
     issuer: str
@@ -105,6 +138,19 @@ class SSLScanResult(BaseModel):
     risk_score: int
     risk_level: Literal["low", "medium", "high", "critical"]
     summary: dict
+
+
+class FullScanResult(BaseModel):
+    domain: str
+    scan_timestamp: str
+    headers: HeaderScanResult
+    dns: DNSScanResult
+    ssl: SSLScanResult
+    exposure: ExposureScanResult
+    fingerprint: FingerprintScanResult
+    overall_risk_score: int
+    overall_risk_level: Literal["low", "medium", "high", "critical"]
+    top_findings: list[dict]
 
 
 def utc_now_iso() -> str:
