@@ -71,5 +71,41 @@ class DNSScanResult(BaseModel):
     summary: dict
 
 
+class CertInfo(BaseModel):
+    subject: str
+    issuer: str
+    not_before: str
+    not_after: str
+    days_until_expiry: int
+    is_self_signed: bool
+    sans: list[str]
+    serial_number: str
+
+
+class TLSVersionCheck(BaseModel):
+    version: str
+    supported: bool | None  # None = could not determine (OS-level restriction)
+
+
+class SSLFinding(BaseModel):
+    check: str
+    status: Literal["pass", "fail", "warn", "info"]
+    severity: Literal["low", "medium", "high"] | None
+    description: str
+    remediation: str | None
+
+
+class SSLScanResult(BaseModel):
+    domain: str
+    port: int
+    scan_timestamp: str
+    certificate: CertInfo | None
+    tls_versions: list[TLSVersionCheck]
+    findings: list[SSLFinding]
+    risk_score: int
+    risk_level: Literal["low", "medium", "high", "critical"]
+    summary: dict
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
