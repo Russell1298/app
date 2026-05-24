@@ -1,4 +1,5 @@
 import uuid
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,7 +160,7 @@ async def _load_scan(scan_id: str, db: AsyncSession | None) -> FullScanResult:
         job_id = uuid.UUID(scan_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid scan ID")
-    row = await db.get(__import__("db.models", fromlist=["ScanJob"]).ScanJob, job_id)
+    row = await db.get(ScanJob, job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Scan not found")
     return FullScanResult.model_validate(row.result)
@@ -189,8 +190,7 @@ async def download_pdf_report(
 ) -> Response:
     """Return a PDF business report for the scan."""
     result = await _load_scan(scan_id, db)
-    import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     pdf_bytes = await loop.run_in_executor(None, generate_pdf, result, client_name)
     filename = f"security-report-{result.domain}.pdf"
     return Response(
