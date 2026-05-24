@@ -23,6 +23,7 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+    command: sh -c "rm -f /app/next.config.ts && npm run dev"
     volumes:
       - ./frontend:/app             # live reload in dev
       - /app/node_modules           # keep container node_modules
