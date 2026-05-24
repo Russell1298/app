@@ -141,6 +141,7 @@ class SSLScanResult(BaseModel):
 
 
 class FullScanResult(BaseModel):
+    scan_id: str | None = None   # set after DB persist
     domain: str
     scan_timestamp: str
     headers: HeaderScanResult
@@ -151,6 +152,14 @@ class FullScanResult(BaseModel):
     overall_risk_score: int
     overall_risk_level: Literal["low", "medium", "high", "critical"]
     top_findings: list[dict]
+
+
+class ScanHistoryItem(BaseModel):
+    scan_id: str
+    domain: str
+    scan_timestamp: str
+    overall_risk_score: int
+    overall_risk_level: str
 
 
 def utc_now_iso() -> str:
