@@ -24,7 +24,7 @@
     background: linear-gradient(145deg, #0f2d5a 0%, #1a4480 100%);
     color: #ffffff;
     padding: 60px 56px 48px;
-    min-height: 100vh;
+    min-height: 280mm;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -72,7 +72,6 @@
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    width: fit-content;
   }
   .badge-low      { background: #166534; color: #bbf7d0; }
   .badge-medium   { background: #92400e; color: #fde68a; }
@@ -136,7 +135,7 @@
   .score-ring svg { display: block; }
   .score-number {
     position: absolute;
-    inset: 0;
+    top: 0; left: 0; right: 0; bottom: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -280,7 +279,8 @@
     font-size: 9pt;
     color: #0f2d5a;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: break-word;
+    word-break: break-all;
     margin-top: 4px;
   }
   .effort-badge {
