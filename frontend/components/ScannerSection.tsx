@@ -10,12 +10,14 @@ export default function ScannerSection({
   level,
   children,
   defaultOpen = false,
+  badge,
 }: {
   title: string
   score: number
   level: RiskLevel
   children: React.ReactNode
   defaultOpen?: boolean
+  badge?: string
 }) {
   const [open, setOpen] = useState(defaultOpen)
 
@@ -28,6 +30,9 @@ export default function ScannerSection({
         <div className="flex items-center gap-3">
           <span className="font-semibold text-gray-200">{title}</span>
           <RiskBadge level={level} />
+          {badge && (
+            <span className="text-xs mono text-gray-400 bg-gray-800 border border-gray-700 rounded px-2 py-0.5">{badge}</span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="mono text-sm text-gray-400">{score}<span className="text-gray-600">/100</span></span>

@@ -121,6 +121,37 @@ export interface SSLScanResult {
   summary: Record<string, unknown>
 }
 
+export interface SubdomainEntry {
+  subdomain: string
+  resolves: boolean
+  ip_addresses: string[]
+}
+
+export interface SubdomainScanResult {
+  domain: string
+  scan_timestamp: string
+  subdomains: SubdomainEntry[]
+  summary: Record<string, unknown>
+}
+
+export interface SecretFinding {
+  pattern_name: string
+  severity: Severity
+  location: string
+  source_url: string
+  match_preview: string
+}
+
+export interface SecretScanResult {
+  domain: string
+  scan_timestamp: string
+  findings: SecretFinding[]
+  files_scanned: number
+  risk_score: number
+  risk_level: RiskLevel
+  summary: Record<string, unknown>
+}
+
 export interface TopFinding {
   scanner: string
   severity: Severity
@@ -138,6 +169,8 @@ export interface FullScanResult {
   ssl: SSLScanResult
   exposure: ExposureScanResult
   fingerprint: FingerprintScanResult
+  subdomains: SubdomainScanResult | null
+  secrets: SecretScanResult | null
   overall_risk_score: number
   overall_risk_level: RiskLevel
   top_findings: TopFinding[]

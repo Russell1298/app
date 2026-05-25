@@ -140,8 +140,39 @@ class SSLScanResult(BaseModel):
     summary: dict
 
 
+class SubdomainEntry(BaseModel):
+    subdomain: str
+    resolves: bool
+    ip_addresses: list[str]
+
+
+class SubdomainScanResult(BaseModel):
+    domain: str
+    scan_timestamp: str
+    subdomains: list[SubdomainEntry]
+    summary: dict
+
+
+class SecretFinding(BaseModel):
+    pattern_name: str
+    severity: Literal["low", "medium", "high"]
+    location: str        # "html", "inline-script", "javascript"
+    source_url: str
+    match_preview: str   # partially redacted — never logs real secrets
+
+
+class SecretScanResult(BaseModel):
+    domain: str
+    scan_timestamp: str
+    findings: list[SecretFinding]
+    files_scanned: int
+    risk_score: int
+    risk_level: Literal["low", "medium", "high", "critical"]
+    summary: dict
+
+
 class FullScanResult(BaseModel):
-    scan_id: str | None = None   # set after DB persist
+    scan_id: str | None = None
     domain: str
     scan_timestamp: str
     headers: HeaderScanResult
@@ -149,6 +180,8 @@ class FullScanResult(BaseModel):
     ssl: SSLScanResult
     exposure: ExposureScanResult
     fingerprint: FingerprintScanResult
+    subdomains: SubdomainScanResult | None = None  # None on old records
+    secrets: SecretScanResult | None = None
     overall_risk_score: int
     overall_risk_level: Literal["low", "medium", "high", "critical"]
     top_findings: list[dict]

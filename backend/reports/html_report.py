@@ -3,10 +3,6 @@ Business report generator.
 
 Takes a FullScanResult and produces a professional HTML report (and
 optionally a PDF via WeasyPrint) suitable for sending to clients.
-
-The report translates technical findings into plain-English business
-language, groups them by severity, and produces a prioritised
-remediation roadmap.
 """
 
 from __future__ import annotations
@@ -134,6 +130,46 @@ _BUSINESS_IMPACT: dict[str, str] = {
         "request, database query, queued job, and exception log — including data that "
         "may contain customer information and application secrets."
     ),
+    # Secrets
+    "Exposed credential": (
+        "A real API key, password, or access token was found in your website's publicly "
+        "visible code. Anyone who visits your site can copy it. Attackers use these "
+        "credentials to access your cloud accounts, billing, databases, or third-party "
+        "services — often running up large bills or exfiltrating customer data."
+    ),
+    "AWS Access Key ID": (
+        "An Amazon Web Services access key was found in your public code. This gives "
+        "anyone who finds it direct access to your AWS account — including storage, "
+        "compute, and potentially customer data — and may result in significant "
+        "unexpected charges."
+    ),
+    "Stripe": (
+        "A Stripe payment API key was found in your public code. This credential "
+        "could be used to initiate fraudulent charges, access transaction history, "
+        "or refund payments — exposing you to direct financial loss."
+    ),
+    "GitHub": (
+        "A GitHub access token was found in your public code. This may allow an "
+        "attacker to read or modify your private repositories, exfiltrate source code, "
+        "or disrupt your development workflow."
+    ),
+    "Private Key": (
+        "A cryptographic private key was found in your public code. This could be used "
+        "to impersonate your server, decrypt communications, or forge signed requests."
+    ),
+    "Database Connection String": (
+        "A database connection string containing credentials was found in your public "
+        "code. This gives anyone direct access to read, modify, or delete all data "
+        "in your database."
+    ),
+    "MongoDB Connection String": (
+        "A MongoDB connection string with credentials was found in your public code. "
+        "This gives anyone direct access to your database, including all stored data."
+    ),
+    "Google API Key": (
+        "A Google API key was found in your public code. Depending on the permissions "
+        "granted, this may allow abuse of Google services billed to your account."
+    ),
 }
 
 _EFFORT: dict[str, str] = {
@@ -158,6 +194,15 @@ _EFFORT: dict[str, str] = {
     "Open directory listing": "Easy — 15 minutes (server config)",
     "Symfony profiler exposed": "Easy — 15 minutes (disable in production config)",
     "Laravel Telescope exposed": "Easy — 15 minutes (environment variable)",
+    "AWS Access Key": "Immediate — revoke key in AWS console, then remove from code",
+    "Stripe": "Immediate — roll key in Stripe dashboard, then remove from code",
+    "GitHub": "Immediate — revoke token in GitHub settings, then remove from code",
+    "Private Key": "Immediate — generate new key pair, revoke old certificate",
+    "Hardcoded Password": "Immediate — change the password, move to environment variable",
+    "API Key": "Immediate — rotate the key with the issuing service, then remove from code",
+    "Database Connection String": "Immediate — change DB credentials, remove from code",
+    "MongoDB Connection String": "Immediate — change DB credentials, remove from code",
+    "Google API Key": "Immediate — restrict or rotate key in Google Cloud Console",
 }
 
 _SCANNER_LABEL: dict[str, str] = {
@@ -166,6 +211,7 @@ _SCANNER_LABEL: dict[str, str] = {
     "ssl":         "SSL / TLS",
     "exposure":    "Public Exposure",
     "fingerprint": "Fingerprint",
+    "secrets":     "Secret Exposure",
 }
 
 
@@ -190,7 +236,6 @@ def _effort(title: str) -> str:
 def _collect_all_findings(result: FullScanResult) -> list[dict]:
     findings: list[dict] = []
 
-    # Headers
     for f in result.headers.findings:
         if f.status in ("missing", "weak"):
             findings.append({
@@ -209,7 +254,6 @@ def _collect_all_findings(result: FullScanResult) -> list[dict]:
             "remediation": f.remediation,
         })
 
-    # DNS
     for f in result.dns.findings:
         if f.status in ("fail", "warn") and f.severity:
             findings.append({
@@ -220,7 +264,6 @@ def _collect_all_findings(result: FullScanResult) -> list[dict]:
                 "remediation": f.remediation or "",
             })
 
-    # SSL
     for f in result.ssl.findings:
         if f.status in ("fail", "warn") and f.severity:
             findings.append({
@@ -231,7 +274,6 @@ def _collect_all_findings(result: FullScanResult) -> list[dict]:
                 "remediation": f.remediation or "",
             })
 
-    # Exposure
     for f in result.exposure.findings:
         if f.exposed and f.status_code == 200 and f.severity not in ("info",):
             findings.append({
@@ -240,6 +282,22 @@ def _collect_all_findings(result: FullScanResult) -> list[dict]:
                 "severity": f.severity,
                 "description": f.description,
                 "remediation": f.remediation or "",
+            })
+
+    if result.secrets:
+        for f in result.secrets.findings:
+            findings.append({
+                "title": f"Exposed {f.pattern_name}",
+                "scanner": "secrets",
+                "severity": f.severity,
+                "description": (
+                    f"A {f.pattern_name} pattern was detected in the {f.location} "
+                    f"of {f.source_url}. Preview: {f.match_preview}"
+                ),
+                "remediation": (
+                    "Remove the credential from the codebase and rotate it immediately "
+                    "with the issuing service. Use environment variables for secrets."
+                ),
             })
 
     for f in findings:
@@ -288,10 +346,7 @@ def _executive_summary(result: FullScanResult, findings: list[dict]) -> str:
     if low:
         counts.append(f"{low} low-severity issue{'s' if low > 1 else ''}")
 
-    if counts:
-        count_str = f"The scan detected {', '.join(counts)}. "
-    else:
-        count_str = "No significant security issues were detected. "
+    count_str = f"The scan detected {', '.join(counts)}. " if counts else "No significant security issues were detected. "
 
     if high > 0:
         close = (
@@ -320,12 +375,19 @@ def _glance_rows(result: FullScanResult, findings: list[dict]) -> list[dict]:
                 return s
         return None
 
-    return [
+    rows = [
         {"category": "Security Headers",      "count": result.headers.summary.get("missing", 0) + result.headers.summary.get("weak", 0), "worst": worst("headers")},
         {"category": "DNS & Email Security",  "count": result.dns.summary.get("fail", 0) + result.dns.summary.get("warn", 0),             "worst": worst("dns")},
         {"category": "SSL / TLS",             "count": result.ssl.summary.get("fail", 0) + result.ssl.summary.get("warn", 0),             "worst": worst("ssl")},
         {"category": "Public Exposure",       "count": result.exposure.summary.get("exposed", 0),                                          "worst": worst("exposure")},
     ]
+    if result.secrets and result.secrets.findings:
+        rows.append({
+            "category": "Secret / Credential Exposure",
+            "count": len(result.secrets.findings),
+            "worst": worst("secrets") or result.secrets.risk_level if result.secrets.risk_level != "low" else worst("secrets"),
+        })
+    return rows
 
 
 def _roadmap(findings: list[dict]) -> dict:
@@ -351,22 +413,33 @@ def generate_html(
 ) -> str:
     all_findings = _collect_all_findings(result)
 
+    scanner_scores = [
+        ("Security Headers", result.headers.risk_score, result.headers.risk_level),
+        ("DNS & Email",      result.dns.risk_score,     result.dns.risk_level),
+        ("SSL / TLS",        result.ssl.risk_score,     result.ssl.risk_level),
+        ("Exposure",         result.exposure.risk_score, result.exposure.risk_level),
+    ]
+    if result.secrets:
+        scanner_scores.append(("Secrets", result.secrets.risk_score, result.secrets.risk_level))
+
+    # Live subdomains for the attack surface section
+    live_subdomains = []
+    if result.subdomains:
+        live_subdomains = [s for s in result.subdomains.subdomains if s.resolves]
+
     context = {
-        "result":          result,
-        "client_name":     client_name,
-        "scan_date":       datetime.now(timezone.utc).strftime("%d %B %Y"),
-        "executive_summary": _executive_summary(result, all_findings),
-        "scanner_scores":  [
-            ("Security Headers", result.headers.risk_score, result.headers.risk_level),
-            ("DNS & Email",      result.dns.risk_score,     result.dns.risk_level),
-            ("SSL / TLS",        result.ssl.risk_score,     result.ssl.risk_level),
-            ("Exposure",         result.exposure.risk_score, result.exposure.risk_level),
-        ],
-        "glance_rows":    _glance_rows(result, all_findings),
-        "high_findings":  [f for f in all_findings if f["severity"] == "high"],
-        "medium_findings": [f for f in all_findings if f["severity"] == "medium"],
-        "low_findings":   [f for f in all_findings if f["severity"] == "low"],
-        "roadmap":        _roadmap(all_findings),
+        "result":             result,
+        "client_name":        client_name,
+        "scan_date":          datetime.now(timezone.utc).strftime("%d %B %Y"),
+        "executive_summary":  _executive_summary(result, all_findings),
+        "scanner_scores":     scanner_scores,
+        "glance_rows":        _glance_rows(result, all_findings),
+        "high_findings":      [f for f in all_findings if f["severity"] == "high"],
+        "medium_findings":    [f for f in all_findings if f["severity"] == "medium"],
+        "low_findings":       [f for f in all_findings if f["severity"] == "low"],
+        "roadmap":            _roadmap(all_findings),
+        "live_subdomains":    live_subdomains,
+        "all_subdomains":     result.subdomains.subdomains if result.subdomains else [],
     }
 
     template = _jinja.get_template("report.html")

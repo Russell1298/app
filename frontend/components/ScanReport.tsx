@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import type { FullScanResult } from '@/types/scan'
+import type { FullScanResult, SubdomainEntry, SecretFinding } from '@/types/scan'
 import RiskScore from './RiskScore'
 import RiskBadge from './RiskBadge'
 import TopFindings from './TopFindings'
@@ -61,8 +61,103 @@ function ReportButtons({ scanId, domain }: { scanId: string; domain: string }) {
   )
 }
 
+function SubdomainsPanel({ subdomains }: { subdomains: SubdomainEntry[] }) {
+  const live = subdomains.filter(s => s.resolves)
+  const dead = subdomains.filter(s => !s.resolves)
+
+  if (subdomains.length === 0) {
+    return <p className="text-xs text-gray-500 py-2">No subdomains found in certificate transparency records.</p>
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-3 text-xs text-gray-400">
+        <span className="text-green-400 font-semibold">{live.length} live</span>
+        <span className="text-gray-600">·</span>
+        <span>{dead.length} not resolving</span>
+        <span className="text-gray-600">·</span>
+        <span>{subdomains.length} total</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-800">
+              <th className="text-left py-1.5 pr-4 text-gray-500 font-medium">Subdomain</th>
+              <th className="text-left py-1.5 pr-4 text-gray-500 font-medium">Status</th>
+              <th className="text-left py-1.5 text-gray-500 font-medium">IP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {subdomains.map(s => (
+              <tr key={s.subdomain} className="border-b border-gray-900">
+                <td className="py-1.5 pr-4 mono text-gray-300">{s.subdomain}</td>
+                <td className="py-1.5 pr-4">
+                  {s.resolves
+                    ? <span className="text-green-400">● Live</span>
+                    : <span className="text-gray-600">○ Dead</span>
+                  }
+                </td>
+                <td className="py-1.5 mono text-gray-500">{s.ip_addresses.join(', ') || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function SecretsPanel({ findings, filesScanned }: { findings: SecretFinding[]; filesScanned: number }) {
+  if (findings.length === 0) {
+    return (
+      <p className="text-xs text-gray-500 py-2">
+        No credentials or secrets detected in {filesScanned} file{filesScanned !== 1 ? 's' : ''} scanned.
+      </p>
+    )
+  }
+
+  const sevColor: Record<string, string> = {
+    high:   'text-red-400 bg-red-900/20 border-red-800',
+    medium: 'text-amber-400 bg-amber-900/20 border-amber-800',
+    low:    'text-blue-400 bg-blue-900/20 border-blue-800',
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-gray-500">
+        {filesScanned} file{filesScanned !== 1 ? 's' : ''} scanned · {findings.length} match{findings.length !== 1 ? 'es' : ''} found
+      </p>
+      {findings.map((f, i) => (
+        <div key={i} className={`border rounded-lg px-3 py-2.5 ${sevColor[f.severity] ?? 'border-gray-700'}`}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-gray-200">{f.pattern_name}</p>
+              <p className="text-xs text-gray-500 mt-0.5 mono truncate">{f.source_url}</p>
+            </div>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wide flex-shrink-0 ${sevColor[f.severity] ?? ''}`}>
+              {f.severity}
+            </span>
+          </div>
+          <div className="flex gap-3 mt-1.5 text-xs text-gray-500">
+            <span>Location: <span className="text-gray-400">{f.location}</span></span>
+            <span>Preview: <span className="mono text-gray-400">{f.match_preview}</span></span>
+          </div>
+        </div>
+      ))}
+      <p className="text-xs text-amber-500/80 mt-2">
+        ⚠ Rotate any matching credentials immediately, then remove them from the codebase.
+      </p>
+    </div>
+  )
+}
+
 export default function ScanReport({ result }: { result: FullScanResult }) {
   const ts = new Date(result.scan_timestamp).toLocaleString()
+
+  const secretsScore  = result.secrets?.risk_score ?? 0
+  const secretsLevel  = result.secrets?.risk_level ?? 'low'
+  const subdomainCount = result.subdomains?.subdomains.length ?? 0
+  const liveCount      = result.subdomains?.subdomains.filter(s => s.resolves).length ?? 0
 
   return (
     <div className="space-y-6">
@@ -96,12 +191,13 @@ export default function ScanReport({ result }: { result: FullScanResult }) {
         </div>
 
         {/* Per-scanner score row */}
-        <div className="mt-5 pt-4 border-t border-gray-800 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="mt-5 pt-4 border-t border-gray-800 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
-            { label: 'Headers', score: result.headers.risk_score,  level: result.headers.risk_level },
-            { label: 'DNS',     score: result.dns.risk_score,      level: result.dns.risk_level },
-            { label: 'SSL/TLS', score: result.ssl.risk_score,      level: result.ssl.risk_level },
-            { label: 'Exposure',score: result.exposure.risk_score, level: result.exposure.risk_level },
+            { label: 'Headers',  score: result.headers.risk_score,  level: result.headers.risk_level },
+            { label: 'DNS',      score: result.dns.risk_score,      level: result.dns.risk_level },
+            { label: 'SSL/TLS',  score: result.ssl.risk_score,      level: result.ssl.risk_level },
+            { label: 'Exposure', score: result.exposure.risk_score, level: result.exposure.risk_level },
+            { label: 'Secrets',  score: secretsScore,               level: secretsLevel },
           ].map(s => (
             <div key={s.label} className="text-center bg-black/20 rounded-lg p-3">
               <p className="text-xs text-gray-500 mb-1">{s.label}</p>
@@ -109,6 +205,12 @@ export default function ScanReport({ result }: { result: FullScanResult }) {
               <RiskBadge level={s.level} className="mt-1" />
             </div>
           ))}
+          {/* Subdomain stat */}
+          <div className="text-center bg-black/20 rounded-lg p-3">
+            <p className="text-xs text-gray-500 mb-1">Subdomains</p>
+            <p className="mono text-lg font-bold text-gray-200">{subdomainCount}</p>
+            <p className="text-xs text-green-400 mt-1">{liveCount} live</p>
+          </div>
         </div>
       </div>
 
@@ -156,6 +258,26 @@ export default function ScanReport({ result }: { result: FullScanResult }) {
           </ScannerSection>
           <ScannerSection title="Technology Fingerprint" score={0} level="low">
             <FingerprintPanel data={result.fingerprint} />
+          </ScannerSection>
+          <ScannerSection
+            title="Subdomain Enumeration"
+            score={0}
+            level="low"
+            defaultOpen={subdomainCount > 0}
+            badge={subdomainCount > 0 ? `${subdomainCount} found` : undefined}
+          >
+            <SubdomainsPanel subdomains={result.subdomains?.subdomains ?? []} />
+          </ScannerSection>
+          <ScannerSection
+            title="Secret & Credential Exposure"
+            score={secretsScore}
+            level={secretsLevel}
+            defaultOpen={secretsScore > 0}
+          >
+            <SecretsPanel
+              findings={result.secrets?.findings ?? []}
+              filesScanned={result.secrets?.files_scanned ?? 0}
+            />
           </ScannerSection>
         </div>
       </div>
