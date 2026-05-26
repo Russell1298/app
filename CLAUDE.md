@@ -31,7 +31,14 @@ The frontend repo is cloned as a **subfolder** of this workspace so Claude Code 
 
 ## Pushing Frontend Changes Live (Lovable Auto-Deploy)
 
-When you edit files in `frontend-lovable/`, push them like this:
+When you edit files in `frontend-lovable/`, **always pull first** to get any changes Lovable may have committed, then push:
+
+```bash
+cd /home/user/app/frontend-lovable
+git pull origin main
+```
+
+Then make your edits, commit, and push:
 
 ```bash
 cd /home/user/app/frontend-lovable
