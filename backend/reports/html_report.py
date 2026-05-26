@@ -94,41 +94,39 @@ _BUSINESS_IMPACT: dict[str, str] = {
         "this to be disabled."
     ),
     # Exposure
-    "Exposed .git directory": (
-        "Your website's entire source code is publicly downloadable. Attackers can "
-        "retrieve your application code, configuration files, database credentials, "
-        "API keys, and the full history of every change ever made — enabling complete "
-        "system compromise."
+    "Git directory": (
+        "The .git directory on this site appears to be publicly accessible. If confirmed, "
+        "an attacker may be able to retrieve your application's source code, full commit "
+        "history, and any credentials that were ever committed — even if later deleted."
     ),
-    "Exposed .env file": (
-        "A configuration file containing your application's secrets is publicly "
-        "accessible. This file typically holds database passwords, API keys, and "
-        "service credentials that grant full access to your systems and data."
+    ".env file": (
+        "An environment configuration file appears to be accessible at a standard location. "
+        "If it contains real application settings, this could expose database passwords, "
+        "API keys, and other credentials used by your application."
     ),
-    "phpMyAdmin exposed": (
-        "Your database administration panel is publicly accessible on the internet. "
-        "Attackers can attempt to brute-force the login and gain full control over "
-        "your database, including all customer data."
+    "phpMyAdmin": (
+        "A phpMyAdmin database management interface appears to be accessible from the "
+        "internet. If unprotected, it could allow an attacker to attempt access to "
+        "your database directly through the browser."
     ),
-    "WordPress admin exposed": (
-        "Your WordPress administration login page is publicly accessible. It is "
-        "constantly targeted by automated bots attempting to guess passwords. "
-        "A successful attack gives full control over your website."
+    "WordPress admin": (
+        "Your WordPress administration area is publicly reachable. WordPress login pages "
+        "are frequently targeted by automated tools that test common password combinations. "
+        "Restricting access by IP or enabling two-factor authentication significantly "
+        "reduces this risk."
     ),
-    "Open directory listing": (
-        "Your web server lists all files in directories like a file browser. Attackers "
-        "can discover and download sensitive files, configuration files, and backup "
-        "archives that were not intended to be public."
+    "directory listing": (
+        "Your web server appears to be showing a file directory listing, allowing visitors "
+        "to browse the folder structure without knowing specific file paths."
     ),
-    "Symfony profiler exposed": (
-        "Your application's debug profiler is publicly accessible. It exposes detailed "
-        "request information, environment variables, database queries, and may reveal "
-        "application secrets and credentials."
+    "Symfony profiler": (
+        "A Symfony debug profiler endpoint appears to be accessible. In production, this "
+        "could expose request details, environment variables, and database query logs."
     ),
-    "Laravel Telescope exposed": (
-        "Your application monitoring panel is publicly accessible, exposing every "
-        "request, database query, queued job, and exception log — including data that "
-        "may contain customer information and application secrets."
+    "Laravel Telescope": (
+        "A Laravel Telescope monitoring endpoint appears to be accessible. If enabled "
+        "in production without access controls, it logs application activity that may "
+        "include customer data, queries, and exception details."
     ),
     # Secrets
     "Exposed credential": (
@@ -282,6 +280,7 @@ def _collect_all_findings(result: FullScanResult) -> list[dict]:
                 "severity": f.severity,
                 "description": f.description,
                 "remediation": f.remediation or "",
+                "confidence": f.confidence,
             })
 
     if result.secrets:

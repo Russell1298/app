@@ -79,6 +79,7 @@ class ExposureFinding(BaseModel):
     severity: Literal["low", "medium", "high", "info"]
     description: str
     remediation: str | None
+    confidence: Literal["confirmed", "likely", "possible"] | None = None
 
 
 class ExposureScanResult(BaseModel):
