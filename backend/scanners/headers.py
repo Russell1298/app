@@ -232,23 +232,61 @@ async def scan_headers(domain: str) -> HeaderScanResult:
 
     lower_headers = {k.lower(): v for k, v in headers_received.items()}
 
+    # Pre-compute CSP values for cross-header checks
+    csp_value = lower_headers.get("content-security-policy", "")
+    csp_ro_value = lower_headers.get("content-security-policy-report-only", "")
+    has_frame_ancestors = "frame-ancestors" in csp_value or "frame-ancestors" in csp_ro_value
+
     # Evaluate required security headers
     for spec in REQUIRED_HEADERS:
         key = spec["header"]
         value = lower_headers.get(key)
 
         if value is None:
-            findings.append(
-                HeaderFinding(
-                    header=spec["display"],
-                    status="missing",
-                    severity=spec["severity"],
-                    value=None,
-                    description=spec["description"],
-                    remediation=spec["remediation"],
+            if key == "content-security-policy" and csp_ro_value:
+                # Report-only CSP present: give partial credit, downgrade severity
+                findings.append(
+                    HeaderFinding(
+                        header=spec["display"],
+                        status="weak",
+                        severity="medium",
+                        value=csp_ro_value,
+                        description=(
+                            "Content-Security-Policy is in report-only mode. "
+                            "Violations are monitored but not blocked — XSS and "
+                            "data-injection attacks are still possible."
+                        ),
+                        remediation=(
+                            "Switch Content-Security-Policy-Report-Only to "
+                            "Content-Security-Policy once your policy is validated."
+                        ),
+                    )
                 )
-            )
-            total_penalty += spec["weight"]
+                total_penalty += spec["weight"] // 2
+            elif key == "x-frame-options" and has_frame_ancestors:
+                # CSP frame-ancestors is the modern equivalent — no penalty
+                findings.append(
+                    HeaderFinding(
+                        header=spec["display"],
+                        status="present",
+                        severity=spec["severity"],
+                        value="(via CSP frame-ancestors)",
+                        description="Frame embedding is restricted via the Content-Security-Policy frame-ancestors directive.",
+                        remediation="No action required.",
+                    )
+                )
+            else:
+                findings.append(
+                    HeaderFinding(
+                        header=spec["display"],
+                        status="missing",
+                        severity=spec["severity"],
+                        value=None,
+                        description=spec["description"],
+                        remediation=spec["remediation"],
+                    )
+                )
+                total_penalty += spec["weight"]
         else:
             # Header present — check for known weak configurations
             weak_finding = None
