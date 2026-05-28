@@ -2,27 +2,20 @@
 Exposure scanner.
 
 Makes targeted passive HTTP GET requests to well-known paths that should
-never be publicly accessible on a production site. Only checks paths that
-are universally recognised as dangerous exposures — no fuzzing, no
-enumeration, no authentication bypass.
-
-Each finding includes a confidence tier based on response body content:
-  confirmed — response body contains signatures of real sensitive content
-  likely    — endpoint is accessible and matches a known dangerous path
-  possible  — endpoint exists but content could not be verified
+never be publicly accessible on a production site. Groups related findings
+and emits critical_triggers for the overall score cap logic.
 """
 
 import re
 import httpx
 import asyncio
+from collections import defaultdict
 from models.scan import ExposureFinding, ExposureScanResult, utc_now_iso
+from scoring_config import PENALTY, scanner_score, risk_level
 
 _TIMEOUT = 8
 _HEADERS = {"User-Agent": "SecurityScanner/1.0 (defensive assessment)"}
 
-# Each probe: (path, label, severity, description, remediation)
-# Descriptions use careful, hedged language — the scanner only observes HTTP
-# status codes and partial body content, not actual exploitability.
 _PROBES: list[dict] = [
     {
         "path": "/.git/HEAD",
@@ -30,8 +23,8 @@ _PROBES: list[dict] = [
         "severity": "high",
         "description": (
             "The /.git/HEAD path returned an HTTP 200 response. If the .git directory "
-            "is truly accessible, an attacker may be able to retrieve source code, "
-            "commit history, and any credentials ever committed — even if later removed."
+            "is truly accessible, an attacker may retrieve source code, commit history, "
+            "and any credentials ever committed — even if later removed."
         ),
         "remediation": (
             "Block access to .git at the web server level.\n"
@@ -45,33 +38,25 @@ _PROBES: list[dict] = [
         "severity": "high",
         "description": (
             "A /.env path returned an HTTP 200 response. Environment files commonly "
-            "contain database credentials, API keys, and other secrets. If this is a "
-            "real configuration file, those values would be publicly readable."
+            "contain database credentials, API keys, and other secrets."
         ),
         "remediation": (
             "Block access to dot-files at the web server level and ensure .env is "
-            "never placed in the webroot. Store secrets in environment variables or "
-            "a dedicated secrets manager."
+            "never placed in the webroot."
         ),
     },
     {
         "path": "/.env.production",
         "label": ".env.production file accessible",
         "severity": "high",
-        "description": (
-            "A /.env.production path returned an HTTP 200 response, potentially "
-            "exposing production application secrets."
-        ),
+        "description": "A /.env.production path returned an HTTP 200 response, potentially exposing production secrets.",
         "remediation": "Block access to all dot-files at the web server level.",
     },
     {
         "path": "/.env.local",
         "label": ".env.local file accessible",
         "severity": "high",
-        "description": (
-            "A /.env.local path returned an HTTP 200 response, potentially "
-            "exposing local override configuration."
-        ),
+        "description": "A /.env.local path returned an HTTP 200 response, potentially exposing local override configuration.",
         "remediation": "Block access to all dot-files at the web server level.",
     },
     {
@@ -79,14 +64,10 @@ _PROBES: list[dict] = [
         "label": "robots.txt present",
         "severity": "info",
         "description": (
-            "robots.txt is present. Review it for internal paths listed under Disallow — "
-            "those paths are still accessible to humans and malicious crawlers; "
-            "they simply will not be indexed by compliant bots."
+            "robots.txt is present. Review Disallow entries — those paths are still "
+            "accessible to humans and malicious crawlers."
         ),
-        "remediation": (
-            "Ensure robots.txt does not reveal paths that should be kept confidential. "
-            "Rely on proper access controls, not robots.txt, to protect sensitive areas."
-        ),
+        "remediation": "Rely on proper access controls, not robots.txt, to protect sensitive areas.",
     },
     {
         "path": "/sitemap.xml",
@@ -101,14 +82,9 @@ _PROBES: list[dict] = [
         "severity": "medium",
         "description": (
             "An /admin path returned a 200 response. If this is an unprotected "
-            "administration interface, it could be targeted for credential-stuffing "
-            "or brute-force attacks. Login forms that require valid credentials are "
-            "lower risk but should still be restricted by IP where possible."
+            "administration interface, it could be targeted for credential-stuffing attacks."
         ),
-        "remediation": (
-            "Restrict the admin interface to specific IP ranges or move it behind a VPN. "
-            "Ensure multi-factor authentication is enforced."
-        ),
+        "remediation": "Restrict the admin interface to specific IP ranges or move it behind a VPN.",
     },
     {
         "path": "/wp-admin/",
@@ -116,13 +92,9 @@ _PROBES: list[dict] = [
         "severity": "medium",
         "description": (
             "A /wp-admin path returned a 200 response. WordPress login pages are heavily "
-            "targeted by automated credential-stuffing tools. This is expected if the "
-            "site runs WordPress, but the login page should be hardened."
+            "targeted by automated credential-stuffing tools."
         ),
-        "remediation": (
-            "Restrict /wp-admin to known IPs, enable two-factor authentication, "
-            "and consider a WAF rule to limit login attempts."
-        ),
+        "remediation": "Restrict /wp-admin to known IPs, enable two-factor authentication.",
     },
     {
         "path": "/wp-login.php",
@@ -138,8 +110,7 @@ _PROBES: list[dict] = [
         "description": (
             "A phpMyAdmin endpoint appears to be accessible. If this is a live "
             "database administration panel without IP restriction, it represents "
-            "a significant risk — phpMyAdmin panels are frequently targeted by "
-            "automated scanners attempting default or common credentials."
+            "a significant risk."
         ),
         "remediation": (
             "Remove phpMyAdmin from the webroot entirely or restrict it to localhost. "
@@ -179,11 +150,10 @@ _PROBES: list[dict] = [
     {
         "path": "/debug",
         "label": "Debug endpoint accessible",
-        "severity": "medium",
+        "severity": "high",
         "description": (
-            "A /debug path returned a 200 response. Depending on the framework, "
-            "debug endpoints can expose diagnostic information, stack traces, or "
-            "environment details. Verify whether this endpoint reveals sensitive data."
+            "A /debug path returned a 200 response. Debug endpoints can expose "
+            "diagnostic information, stack traces, or environment details."
         ),
         "remediation": "Disable or restrict debug endpoints in production environments.",
     },
@@ -192,9 +162,9 @@ _PROBES: list[dict] = [
         "label": "Symfony profiler accessible",
         "severity": "high",
         "description": (
-            "A Symfony profiler endpoint appears to be accessible. If the profiler "
-            "is enabled in production, it can expose detailed request data, "
-            "environment variables, database queries, and sometimes credentials."
+            "A Symfony profiler endpoint appears to be accessible. If enabled in "
+            "production, it can expose request data, environment variables, database "
+            "queries, and sometimes credentials."
         ),
         "remediation": "Disable the profiler in production: web_profiler.toolbar: false",
     },
@@ -204,14 +174,40 @@ _PROBES: list[dict] = [
         "severity": "high",
         "description": (
             "A Laravel Telescope endpoint appears to be accessible. If enabled in "
-            "production without authentication, it logs every application request, "
-            "database query, queued job, and exception."
+            "production without authentication, it logs every request, query, and exception."
         ),
-        "remediation": (
-            "Restrict Telescope with a gate policy or disable it: TELESCOPE_ENABLED=false"
-        ),
+        "remediation": "Restrict Telescope with a gate policy or disable it: TELESCOPE_ENABLED=false",
     },
 ]
+
+# Maps probe path -> group name for scoring
+_PATH_GROUP: dict[str, str] = {
+    "/.env":             "env",
+    "/.env.production":  "env",
+    "/.env.local":       "env",
+    "/.git/HEAD":        "git",
+    "/phpmyadmin/":      "db_admin",
+    "/_profiler":        "debug_panel",
+    "/telescope":        "debug_panel",
+    "/debug":            "debug_panel",
+    "/admin":            "admin",
+    "/wp-admin/":        "admin",
+    "/wp-login.php":     "admin",
+    "/server-status":    "server_info",
+    "/server-info":      "server_info",
+    "/":                 "dir_listing",
+}
+
+_GROUP_SPEC: dict[str, dict] = {
+    "env":         {"severity": "high",   "trigger": "env_exposed"},
+    "git":         {"severity": "high",   "trigger": "git_exposed"},
+    "db_admin":    {"severity": "high",   "trigger": "db_admin_exposed"},
+    "debug_panel": {"severity": "high",   "trigger": "debug_panel_exposed"},
+    "admin":       {"severity": "medium", "trigger": None},
+    "server_info": {"severity": "medium", "trigger": None},
+    "dir_listing": {"severity": "medium", "trigger": None},
+    "other":       {"severity": "medium", "trigger": None},
+}
 
 _DIRECTORY_LISTING_MARKERS = (
     "Index of /",
@@ -220,7 +216,6 @@ _DIRECTORY_LISTING_MARKERS = (
     "Parent Directory",
 )
 
-# Body content patterns that confirm a finding is real sensitive data
 _ENV_PATTERN = re.compile(r'(?m)^[A-Z_][A-Z0-9_]*\s*=\S', re.MULTILINE)
 
 _CONFIRMED_SIGNATURES: dict[str, list[str]] = {
@@ -232,22 +227,17 @@ _CONFIRMED_SIGNATURES: dict[str, list[str]] = {
     "/server-info":       ["Apache Server Information", "Server Settings"],
 }
 
-# Paths where a 200 alone doesn't confirm anything — auth pages are expected to return 200
 _POSSIBLE_ONLY_PATHS = {"/admin", "/wp-admin/", "/wp-login.php", "/debug"}
 
 
 def _confidence(path: str, body: str) -> str:
-    """Determine confidence from response body content."""
     if path in ("/.env", "/.env.production", "/.env.local"):
         return "confirmed" if _ENV_PATTERN.search(body[:3000]) else "likely"
-
     sigs = _CONFIRMED_SIGNATURES.get(path)
     if sigs and any(s in body for s in sigs):
         return "confirmed"
-
     if path in _POSSIBLE_ONLY_PATHS:
         return "possible"
-
     return "likely"
 
 
@@ -283,9 +273,7 @@ async def _probe(client: httpx.AsyncClient, base_url: str, probe: dict) -> Expos
             severity="low",
             description=(
                 probe["description"] +
-                " Access is currently blocked (HTTP 403), meaning the path exists "
-                "but is presently restricted. This will become a risk if that "
-                "restriction is removed."
+                " Access is currently blocked (HTTP 403) — restricted but the path exists."
             ),
             remediation=probe.get("remediation"),
             confidence="possible",
@@ -299,7 +287,6 @@ async def _check_directory_listing(client: httpx.AsyncClient, base_url: str) -> 
         resp = await client.get(base_url + "/")
     except httpx.RequestError:
         return None
-
     if resp.status_code == 200:
         body = resp.text
         if any(marker in body for marker in _DIRECTORY_LISTING_MARKERS):
@@ -310,8 +297,8 @@ async def _check_directory_listing(client: httpx.AsyncClient, base_url: str) -> 
                 exposed=True,
                 severity="medium",
                 description=(
-                    "The web root appears to be returning a directory listing, allowing "
-                    "visitors to browse files without knowing specific URLs."
+                    "The web root appears to be returning a directory listing, "
+                    "allowing visitors to browse files without knowing specific URLs."
                 ),
                 remediation=(
                     "Disable directory indexing.\n"
@@ -339,30 +326,36 @@ async def scan_exposure(domain: str) -> ExposureScanResult:
         r for r in results if isinstance(r, ExposureFinding)
     ]
 
+    # Grouped penalty: related findings share a base penalty + 2pts per extra
+    group_counts: dict[str, int] = defaultdict(int)
+    for f in findings:
+        if f.exposed and f.status_code == 200 and f.severity not in ("info",):
+            group = _PATH_GROUP.get(f.path, "other")
+            group_counts[group] += 1
+
+    total_penalty = 0
+    critical_triggers: list[str] = []
+    for group_name, count in group_counts.items():
+        spec = _GROUP_SPEC.get(group_name, _GROUP_SPEC["other"])
+        base = PENALTY[spec["severity"]]
+        extra = max(0, count - 1) * 2
+        total_penalty += base + extra
+        if spec["trigger"] and spec["trigger"] not in critical_triggers:
+            critical_triggers.append(spec["trigger"])
+
+    risk = scanner_score(total_penalty, "exposure")
+    level = risk_level(risk)
+
     exposed = [f for f in findings if f.exposed and f.severity != "info"]
     info    = [f for f in findings if f.severity == "info"]
-
-    penalty_map = {"high": 25, "medium": 12, "low": 5, "info": 0}
-    risk_score = min(100, sum(
-        penalty_map[f.severity] for f in findings
-        if f.exposed and f.status_code == 200
-    ))
-
-    if risk_score < 25:
-        risk_level = "low"
-    elif risk_score < 50:
-        risk_level = "medium"
-    elif risk_score < 75:
-        risk_level = "high"
-    else:
-        risk_level = "critical"
 
     return ExposureScanResult(
         domain=domain,
         scan_timestamp=utc_now_iso(),
         findings=findings,
-        risk_score=risk_score,
-        risk_level=risk_level,
+        risk_score=risk,
+        risk_level=level,
+        critical_triggers=critical_triggers,
         summary={
             "paths_checked": len(_PROBES) + 1,
             "exposed": len(exposed),

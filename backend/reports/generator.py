@@ -1,9 +1,10 @@
 """
 Report generator.
 
-Aggregates the results of all scanners into a single FullScanResult.
-Computes a weighted overall risk score and surfaces the highest-severity
-findings as a top_findings list for quick consumption by the frontend.
+Aggregates scanner results into a FullScanResult. Applies the v2 weighted
+overall risk score, then applies critical-fail floor caps as a post-step
+(not baked into individual scanners). This is what makes the score
+business-defensible: a site leaking .env cannot score 50 due to a clean cert.
 """
 
 from models.scan import (
@@ -12,14 +13,7 @@ from models.scan import (
     SubdomainScanResult, SecretScanResult,
     FullScanResult, utc_now_iso,
 )
-
-_SCANNER_WEIGHTS = {
-    "ssl":      0.28,
-    "headers":  0.23,
-    "dns":      0.22,
-    "exposure": 0.17,
-    "secrets":  0.10,
-}
+from scoring_config import SCANNER_WEIGHTS, CRITICAL_CAPS, risk_level
 
 
 def _weighted_score(
@@ -30,24 +24,28 @@ def _weighted_score(
     secrets: SecretScanResult | None = None,
 ) -> int:
     raw = (
-        ssl.risk_score      * _SCANNER_WEIGHTS["ssl"] +
-        headers.risk_score  * _SCANNER_WEIGHTS["headers"] +
-        dns.risk_score      * _SCANNER_WEIGHTS["dns"] +
-        exposure.risk_score * _SCANNER_WEIGHTS["exposure"]
+        ssl.risk_score      * SCANNER_WEIGHTS["ssl"] +
+        headers.risk_score  * SCANNER_WEIGHTS["headers"] +
+        dns.risk_score      * SCANNER_WEIGHTS["dns"] +
+        exposure.risk_score * SCANNER_WEIGHTS["exposure"]
     )
     if secrets:
-        raw += secrets.risk_score * _SCANNER_WEIGHTS["secrets"]
-    return min(100, int(raw))
+        raw += secrets.risk_score * SCANNER_WEIGHTS["secrets"]
+    score = min(100, round(raw))
 
+    # Collect all critical triggers emitted by scanners
+    all_triggers: set[str] = set()
+    for result in [headers, dns, ssl, exposure]:
+        all_triggers.update(result.critical_triggers)
+    if secrets:
+        all_triggers.update(secrets.critical_triggers)
 
-def _risk_level(score: int) -> str:
-    if score < 25:
-        return "low"
-    if score < 50:
-        return "medium"
-    if score < 75:
-        return "high"
-    return "critical"
+    # Apply floor caps: certain findings cannot be averaged away by good hygiene elsewhere
+    for trigger, floor in CRITICAL_CAPS.items():
+        if trigger in all_triggers:
+            score = max(score, floor)
+
+    return min(100, score)
 
 
 def _top_findings(
@@ -152,6 +150,6 @@ def build_full_report(
         subdomains=subdomains,
         secrets=secrets,
         overall_risk_score=score,
-        overall_risk_level=_risk_level(score),
+        overall_risk_level=risk_level(score),
         top_findings=_top_findings(headers, dns, ssl, exposure, secrets),
     )
