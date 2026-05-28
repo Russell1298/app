@@ -1,19 +1,8 @@
 """
 DNS and email authentication scanner.
 
-Performs passive DNS lookups only — no zone transfers, no brute forcing,
-no subdomain enumeration. Uses the public resolver to read records the
-domain owner has intentionally published.
-
-Checks:
-  - A / AAAA  : resolves to at least one IP
-  - MX        : mail servers present
-  - NS        : authoritative nameservers
-  - TXT       : raw records for manual review
-  - SPF       : email sender policy (v=spf1 in TXT)
-  - DMARC     : _dmarc.<domain> TXT policy
-  - CAA       : certificate authority restrictions
-  - DNSSEC    : DS record presence at the domain
+Performs passive DNS lookups only. DNSSEC is reported as informational only
+(not penalised) per v2 spec — too many legitimate large sites skip it.
 """
 
 import asyncio
@@ -21,18 +10,14 @@ import dns.resolver
 import dns.exception
 import dns.rdatatype
 from models.scan import DNSRecord, DNSFinding, DNSScanResult, utc_now_iso
+from scoring_config import PENALTY, scanner_score, risk_level
 
 _RESOLVER = dns.resolver.Resolver()
 _RESOLVER.timeout = 5
 _RESOLVER.lifetime = 10
 
 
-# ---------------------------------------------------------------------------
-# Low-level helpers
-# ---------------------------------------------------------------------------
-
 def _query(name: str, rdtype: str) -> list[str]:
-    """Return string representations of all rdata for (name, rdtype), or []."""
     try:
         answers = _RESOLVER.resolve(name, rdtype)
         return [r.to_text().strip('"') for r in answers]
@@ -43,12 +28,10 @@ def _query(name: str, rdtype: str) -> list[str]:
 
 
 def _txt_records(name: str) -> list[str]:
-    """Return all TXT record strings joined if multi-part."""
     try:
         answers = _RESOLVER.resolve(name, "TXT")
         results = []
         for rdata in answers:
-            # Each TXT rdata may be split across multiple strings — join them
             joined = "".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings)
             results.append(joined)
         return results
@@ -57,10 +40,6 @@ def _txt_records(name: str) -> list[str]:
     except dns.exception.DNSException:
         return []
 
-
-# ---------------------------------------------------------------------------
-# Individual checks
-# ---------------------------------------------------------------------------
 
 def _check_a(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
     values = _query(domain, "A") + _query(domain, "AAAA")
@@ -155,14 +134,12 @@ def _check_spf(domain: str) -> DNSFinding:
             severity="high",
             description=(
                 "No SPF record found. Without SPF, anyone can send email claiming to "
-                "be from this domain, enabling phishing and spam attacks that impersonate "
-                "your organisation."
+                "be from this domain, enabling phishing and spam attacks."
             ),
             remediation=(
                 "Add a TXT record: v=spf1 include:<your-mail-provider> -all\n"
                 "Replace <your-mail-provider> with your actual email service "
-                "(e.g. include:_spf.google.com for Google Workspace). "
-                "End with -all to reject unauthorised senders."
+                "(e.g. include:_spf.google.com for Google Workspace)."
             ),
         )
 
@@ -173,14 +150,9 @@ def _check_spf(domain: str) -> DNSFinding:
             severity="medium",
             description=(
                 f"Multiple SPF records found ({len(spf_records)}). "
-                "RFC 7208 requires exactly one SPF record. Having more than one "
-                "causes unpredictable evaluation and many receivers will reject or "
-                "ignore your email."
+                "RFC 7208 requires exactly one SPF record."
             ),
-            remediation=(
-                "Merge all SPF mechanisms into a single TXT record. "
-                "Delete the extras and keep only one v=spf1 ... record."
-            ),
+            remediation="Merge all SPF mechanisms into a single TXT record.",
         )
 
     spf = spf_records[0]
@@ -192,7 +164,7 @@ def _check_spf(domain: str) -> DNSFinding:
             severity="high",
             description=(
                 f"SPF record uses '+all' which passes all senders: {spf!r}. "
-                "This is effectively no protection at all — anyone can spoof your domain."
+                "This is effectively no protection — anyone can spoof your domain."
             ),
             remediation="Change '+all' to '-all' to reject mail from unlisted senders.",
         )
@@ -216,10 +188,9 @@ def _check_spf(domain: str) -> DNSFinding:
             severity="low",
             description=(
                 f"SPF uses '~all' (softfail): {spf!r}. "
-                "Unauthorised senders are flagged but not always rejected. "
-                "This is a transitional setting and should be hardened."
+                "Unauthorised senders are flagged but not always rejected."
             ),
-            remediation="Change '~all' to '-all' once you are confident your legitimate mail sources are listed.",
+            remediation="Change '~all' to '-all' once legitimate mail sources are all listed.",
         )
 
     return DNSFinding(
@@ -244,16 +215,14 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
                 status="fail",
                 severity="high",
                 description=(
-                    "No DMARC record found at _dmarc." + domain + ". "
-                    "Without DMARC, even a correctly configured SPF or DKIM policy "
-                    "provides no instruction to receiving mail servers on what to do "
+                    f"No DMARC record found at _dmarc.{domain}. "
+                    "Without DMARC, mail receivers have no instruction on what to do "
                     "with failing messages, leaving your domain open to impersonation."
                 ),
                 remediation=(
-                    "Add a TXT record at _dmarc." + domain + ":\n"
-                    "v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@" + domain + "\n"
-                    "Start with p=none to monitor, then move to p=quarantine, "
-                    "then p=reject once you are confident no legitimate mail is failing."
+                    f"Add a TXT record at _dmarc.{domain}:\n"
+                    f"v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@{domain}\n"
+                    "Start with p=none to monitor, then move to p=quarantine, then p=reject."
                 ),
             ),
         )
@@ -261,7 +230,6 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
     dmarc = dmarc_records[0]
     record = DNSRecord(record_type="DMARC", values=[dmarc])
 
-    # Parse policy
     policy = "none"
     for part in dmarc.split(";"):
         part = part.strip()
@@ -278,12 +246,11 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
                 severity="medium",
                 description=(
                     f"DMARC record is present but policy is 'none': {dmarc!r}. "
-                    "p=none only monitors — failing messages are not quarantined or rejected. "
-                    "Your domain can still be spoofed without consequence."
+                    "p=none only monitors — failing messages are not quarantined or rejected."
                 ),
                 remediation=(
-                    "Review your DMARC aggregate reports (rua=), then change p=none to "
-                    "p=quarantine, and later p=reject once all legitimate mail is passing."
+                    "Review DMARC aggregate reports, then change p=none to p=quarantine, "
+                    "and later p=reject."
                 ),
             ),
         )
@@ -297,12 +264,9 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
                 severity="low",
                 description=(
                     f"DMARC policy is 'quarantine': {dmarc!r}. "
-                    "Failing messages go to spam rather than being rejected outright."
+                    "Failing messages go to spam rather than being rejected."
                 ),
-                remediation=(
-                    "Consider upgrading to p=reject once you have confirmed no legitimate "
-                    "mail is failing DMARC checks."
-                ),
+                remediation="Consider upgrading to p=reject once you confirm no legitimate mail is failing.",
             ),
         )
 
@@ -339,21 +303,19 @@ def _check_caa(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
             severity="low",
             description=(
                 "No CAA records found. Without CAA, any certificate authority can issue "
-                "TLS certificates for this domain. A compromised or rogue CA could issue "
-                "fraudulent certificates."
+                "TLS certificates for this domain."
             ),
             remediation=(
                 "Add CAA records listing only the CA(s) you use, e.g.:\n"
-                '0 issue "letsencrypt.org"\n'
-                '0 issuewild "letsencrypt.org"\n'
-                '0 iodef "mailto:security@' + domain + '"'
+                '0 issue \"letsencrypt.org\"\n'
+                f'0 iodef \"mailto:security@{domain}\"'
             ),
         ),
     )
 
 
 def _check_dnssec(domain: str) -> DNSFinding:
-    """Check for a DS record — presence implies DNSSEC is delegated."""
+    """DNSSEC is informational only in v2 — not penalised."""
     ds_values = _query(domain, "DS")
     if ds_values:
         return DNSFinding(
@@ -363,7 +325,6 @@ def _check_dnssec(domain: str) -> DNSFinding:
             description="DNSSEC DS record found — DNS responses for this domain are signed.",
             remediation=None,
         )
-    # Also try DNSKEY directly (works when the resolver is authoritative or has the key)
     dnskey_values = _query(domain, "DNSKEY")
     if dnskey_values:
         return DNSFinding(
@@ -375,51 +336,26 @@ def _check_dnssec(domain: str) -> DNSFinding:
         )
     return DNSFinding(
         check="DNSSEC",
-        status="warn",
-        severity="low",
+        status="info",
+        severity=None,
         description=(
-            "No DNSSEC DS or DNSKEY records found. Without DNSSEC, DNS responses can "
-            "be forged by an attacker on the network, redirecting your visitors to "
-            "malicious servers."
+            "DNSSEC is not configured. DNS responses are not cryptographically signed. "
+            "Many large legitimate sites skip this — reported for information only."
         ),
-        remediation=(
-            "Enable DNSSEC through your domain registrar or DNS hosting provider. "
-            "Most managed DNS services offer one-click DNSSEC enablement."
-        ),
+        remediation="Consider enabling DNSSEC through your domain registrar or DNS provider.",
     )
-
-
-# ---------------------------------------------------------------------------
-# Risk scoring
-# ---------------------------------------------------------------------------
-
-_SEVERITY_PENALTY = {"high": 25, "medium": 12, "low": 5}
 
 
 def _score(findings: list[DNSFinding]) -> tuple[int, str]:
     total = 0
     for f in findings:
         if f.status in ("fail", "warn") and f.severity:
-            total += _SEVERITY_PENALTY[f.severity]
-    total = min(total, 100)
-    if total < 25:
-        return total, "low"
-    if total < 50:
-        return total, "medium"
-    if total < 75:
-        return total, "high"
-    return total, "critical"
+            total += PENALTY[f.severity]
+    risk_score = scanner_score(total, "dns")
+    return risk_score, risk_level(risk_score)
 
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
 
 async def scan_dns(domain: str) -> DNSScanResult:
-    """
-    Run all DNS checks for a domain. Executes blocking dnspython calls in a
-    thread pool so they don't block the FastAPI event loop.
-    """
     loop = asyncio.get_event_loop()
 
     def _run_all() -> tuple:
@@ -456,7 +392,7 @@ async def scan_dns(domain: str) -> DNSScanResult:
     records = [r for r in [a_record, mx_record, ns_record, txt_record, dmarc_record, caa_record] if r]
     findings = [a_finding, mx_finding, ns_finding, spf_finding, dmarc_finding, caa_finding, dnssec_finding]
 
-    risk_score, risk_level = _score(findings)
+    risk_score, level = _score(findings)
 
     fail_count = sum(1 for f in findings if f.status == "fail")
     warn_count = sum(1 for f in findings if f.status == "warn")
@@ -468,7 +404,8 @@ async def scan_dns(domain: str) -> DNSScanResult:
         records=records,
         findings=findings,
         risk_score=risk_score,
-        risk_level=risk_level,
+        risk_level=level,
+        critical_triggers=[],
         summary={
             "checks_run": len(findings),
             "fail": fail_count,

@@ -11,9 +11,7 @@ class ScanRequest(BaseModel):
     @classmethod
     def clean_domain(cls, v: str) -> str:
         v = v.strip().lower()
-        # Strip scheme if user pastes a full URL
         v = re.sub(r"^https?://", "", v)
-        # Strip trailing slashes and paths
         v = v.split("/")[0]
         if not re.match(r"^[a-z0-9][a-z0-9\-\.]{0,252}[a-z0-9]$", v):
             raise ValueError("Invalid domain name")
@@ -43,8 +41,9 @@ class HeaderScanResult(BaseModel):
     scan_timestamp: str
     findings: list[HeaderFinding]
     information_leaks: list[InformationLeakFinding]
-    risk_score: int          # 0-100
+    risk_score: int
     risk_level: Literal["low", "medium", "high", "critical"]
+    critical_triggers: list[str] = []
     summary: dict
 
 
@@ -68,6 +67,7 @@ class DNSScanResult(BaseModel):
     findings: list[DNSFinding]
     risk_score: int
     risk_level: Literal["low", "medium", "high", "critical"]
+    critical_triggers: list[str] = []
     summary: dict
 
 
@@ -88,6 +88,7 @@ class ExposureScanResult(BaseModel):
     findings: list[ExposureFinding]
     risk_score: int
     risk_level: Literal["low", "medium", "high", "critical"]
+    critical_triggers: list[str] = []
     summary: dict
 
 
@@ -118,7 +119,7 @@ class CertInfo(BaseModel):
 
 class TLSVersionCheck(BaseModel):
     version: str
-    supported: bool | None  # None = could not determine (OS-level restriction)
+    supported: bool | None
 
 
 class SSLFinding(BaseModel):
@@ -138,6 +139,7 @@ class SSLScanResult(BaseModel):
     findings: list[SSLFinding]
     risk_score: int
     risk_level: Literal["low", "medium", "high", "critical"]
+    critical_triggers: list[str] = []
     summary: dict
 
 
@@ -157,9 +159,9 @@ class SubdomainScanResult(BaseModel):
 class SecretFinding(BaseModel):
     pattern_name: str
     severity: Literal["low", "medium", "high"]
-    location: str        # "html", "inline-script", "javascript"
+    location: str
     source_url: str
-    match_preview: str   # partially redacted — never logs real secrets
+    match_preview: str
 
 
 class SecretScanResult(BaseModel):
@@ -169,6 +171,7 @@ class SecretScanResult(BaseModel):
     files_scanned: int
     risk_score: int
     risk_level: Literal["low", "medium", "high", "critical"]
+    critical_triggers: list[str] = []
     summary: dict
 
 
@@ -181,7 +184,7 @@ class FullScanResult(BaseModel):
     ssl: SSLScanResult
     exposure: ExposureScanResult
     fingerprint: FingerprintScanResult
-    subdomains: SubdomainScanResult | None = None  # None on old records
+    subdomains: SubdomainScanResult | None = None
     secrets: SecretScanResult | None = None
     overall_risk_score: int
     overall_risk_level: Literal["low", "medium", "high", "critical"]
