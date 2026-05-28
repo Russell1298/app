@@ -2,8 +2,8 @@
 Exposure scanner.
 
 Makes targeted passive HTTP GET requests to well-known paths that should
-never be publicly accessible on a production site. Groups related findings
-and emits critical_triggers for the overall score cap logic.
+never be publicly accessible. Groups related findings and emits
+critical_triggers for the overall score cap logic.
 """
 
 import re
@@ -26,47 +26,34 @@ _PROBES: list[dict] = [
             "is truly accessible, an attacker may retrieve source code, commit history, "
             "and any credentials ever committed — even if later removed."
         ),
-        "remediation": (
-            "Block access to .git at the web server level.\n"
-            "nginx:  location ~ /\\.git { deny all; }\n"
-            "Apache: RedirectMatch 404 /\\.git"
-        ),
+        "remediation": "Block access to .git: nginx: location ~ /\\.git { deny all; } | Apache: RedirectMatch 404 /\\.git",
     },
     {
         "path": "/.env",
         "label": ".env file accessible",
         "severity": "high",
-        "description": (
-            "A /.env path returned an HTTP 200 response. Environment files commonly "
-            "contain database credentials, API keys, and other secrets."
-        ),
-        "remediation": (
-            "Block access to dot-files at the web server level and ensure .env is "
-            "never placed in the webroot."
-        ),
+        "description": "A /.env path returned HTTP 200. Environment files commonly contain database credentials, API keys, and other secrets.",
+        "remediation": "Block access to dot-files and ensure .env is never placed in the webroot.",
     },
     {
         "path": "/.env.production",
         "label": ".env.production file accessible",
         "severity": "high",
-        "description": "A /.env.production path returned an HTTP 200 response, potentially exposing production secrets.",
+        "description": "A /.env.production path returned HTTP 200, potentially exposing production secrets.",
         "remediation": "Block access to all dot-files at the web server level.",
     },
     {
         "path": "/.env.local",
         "label": ".env.local file accessible",
         "severity": "high",
-        "description": "A /.env.local path returned an HTTP 200 response, potentially exposing local override configuration.",
+        "description": "A /.env.local path returned HTTP 200, potentially exposing local override configuration.",
         "remediation": "Block access to all dot-files at the web server level.",
     },
     {
         "path": "/robots.txt",
         "label": "robots.txt present",
         "severity": "info",
-        "description": (
-            "robots.txt is present. Review Disallow entries — those paths are still "
-            "accessible to humans and malicious crawlers."
-        ),
+        "description": "robots.txt is present. Review Disallow entries — those paths are still accessible to humans and malicious crawlers.",
         "remediation": "Rely on proper access controls, not robots.txt, to protect sensitive areas.",
     },
     {
@@ -80,20 +67,14 @@ _PROBES: list[dict] = [
         "path": "/admin",
         "label": "Admin path accessible",
         "severity": "medium",
-        "description": (
-            "An /admin path returned a 200 response. If this is an unprotected "
-            "administration interface, it could be targeted for credential-stuffing attacks."
-        ),
+        "description": "An /admin path returned 200. If unprotected, it could be targeted for credential-stuffing attacks.",
         "remediation": "Restrict the admin interface to specific IP ranges or move it behind a VPN.",
     },
     {
         "path": "/wp-admin/",
         "label": "WordPress admin accessible",
         "severity": "medium",
-        "description": (
-            "A /wp-admin path returned a 200 response. WordPress login pages are heavily "
-            "targeted by automated credential-stuffing tools."
-        ),
+        "description": "A /wp-admin path returned 200. WordPress login pages are heavily targeted by automated credential-stuffing tools.",
         "remediation": "Restrict /wp-admin to known IPs, enable two-factor authentication.",
     },
     {
@@ -107,80 +88,53 @@ _PROBES: list[dict] = [
         "path": "/phpmyadmin/",
         "label": "phpMyAdmin endpoint accessible",
         "severity": "high",
-        "description": (
-            "A phpMyAdmin endpoint appears to be accessible. If this is a live "
-            "database administration panel without IP restriction, it represents "
-            "a significant risk."
-        ),
-        "remediation": (
-            "Remove phpMyAdmin from the webroot entirely or restrict it to localhost. "
-            "Use an SSH tunnel to access it when needed."
-        ),
+        "description": "A phpMyAdmin endpoint appears to be accessible. Without IP restriction this is a high-value target for automated attacks.",
+        "remediation": "Remove phpMyAdmin from the webroot or restrict it to localhost. Use an SSH tunnel to access it.",
     },
     {
         "path": "/server-status",
         "label": "Apache server-status accessible",
         "severity": "medium",
-        "description": (
-            "An Apache mod_status page may be accessible, potentially exposing "
-            "real-time request data, active connections, and server version details."
-        ),
-        "remediation": 'Restrict with: <Location "/server-status"> Require ip 127.0.0.1 </Location>',
+        "description": "An Apache mod_status page may be accessible, exposing real-time request data and server version.",
+        "remediation": 'Restrict: <Location "/server-status"> Require ip 127.0.0.1 </Location>',
     },
     {
         "path": "/server-info",
         "label": "Apache server-info accessible",
         "severity": "medium",
-        "description": (
-            "An Apache mod_info page may be accessible, potentially exposing "
-            "server configuration and loaded module details."
-        ),
+        "description": "An Apache mod_info page may be accessible, exposing server configuration details.",
         "remediation": "Apply the same IP restriction as server-status.",
     },
     {
         "path": "/.well-known/security.txt",
         "label": "security.txt",
         "severity": "info",
-        "description": (
-            "security.txt is present — a positive signal that provides a contact "
-            "point for responsible disclosure of vulnerabilities."
-        ),
+        "description": "security.txt is present — a positive signal providing a responsible disclosure contact.",
         "remediation": None,
     },
     {
         "path": "/debug",
         "label": "Debug endpoint accessible",
         "severity": "high",
-        "description": (
-            "A /debug path returned a 200 response. Debug endpoints can expose "
-            "diagnostic information, stack traces, or environment details."
-        ),
+        "description": "A /debug path returned 200. Debug endpoints can expose stack traces, environment details, and diagnostic data.",
         "remediation": "Disable or restrict debug endpoints in production environments.",
     },
     {
         "path": "/_profiler",
         "label": "Symfony profiler accessible",
         "severity": "high",
-        "description": (
-            "A Symfony profiler endpoint appears to be accessible. If enabled in "
-            "production, it can expose request data, environment variables, database "
-            "queries, and sometimes credentials."
-        ),
+        "description": "A Symfony profiler endpoint appears accessible. In production it can expose requests, env vars, DB queries, and credentials.",
         "remediation": "Disable the profiler in production: web_profiler.toolbar: false",
     },
     {
         "path": "/telescope",
         "label": "Laravel Telescope accessible",
         "severity": "high",
-        "description": (
-            "A Laravel Telescope endpoint appears to be accessible. If enabled in "
-            "production without authentication, it logs every request, query, and exception."
-        ),
+        "description": "A Laravel Telescope endpoint appears accessible. Without authentication it logs every request, query, and exception.",
         "remediation": "Restrict Telescope with a gate policy or disable it: TELESCOPE_ENABLED=false",
     },
 ]
 
-# Maps probe path -> group name for scoring
 _PATH_GROUP: dict[str, str] = {
     "/.env":             "env",
     "/.env.production":  "env",
@@ -210,21 +164,18 @@ _GROUP_SPEC: dict[str, dict] = {
 }
 
 _DIRECTORY_LISTING_MARKERS = (
-    "Index of /",
-    "Directory listing for",
-    "<title>Index of",
-    "Parent Directory",
+    "Index of /", "Directory listing for", "<title>Index of", "Parent Directory",
 )
 
 _ENV_PATTERN = re.compile(r'(?m)^[A-Z_][A-Z0-9_]*\s*=\S', re.MULTILINE)
 
 _CONFIRMED_SIGNATURES: dict[str, list[str]] = {
-    "/.git/HEAD":         ["ref: refs/heads/", "ref: refs/"],
-    "/_profiler":         ["Symfony", "sf-toolbar", "Profiler"],
-    "/telescope":         ["Telescope", "telescope"],
-    "/phpmyadmin/":       ["phpMyAdmin", "PMA_"],
-    "/server-status":     ["requests/sec", "Apache Status", "Server Version:"],
-    "/server-info":       ["Apache Server Information", "Server Settings"],
+    "/.git/HEAD":     ["ref: refs/heads/", "ref: refs/"],
+    "/_profiler":     ["Symfony", "sf-toolbar", "Profiler"],
+    "/telescope":     ["Telescope", "telescope"],
+    "/phpmyadmin/":   ["phpMyAdmin", "PMA_"],
+    "/server-status": ["requests/sec", "Apache Status", "Server Version:"],
+    "/server-info":   ["Apache Server Information", "Server Settings"],
 }
 
 _POSSIBLE_ONLY_PATHS = {"/admin", "/wp-admin/", "/wp-login.php", "/debug"}
@@ -253,15 +204,17 @@ async def _probe(client: httpx.AsyncClient, base_url: str, probe: dict) -> Expos
     if status_code == 200:
         body = resp.text[:4000]
         conf = _confidence(probe["path"], body)
+        sev = probe["severity"]
         return ExposureFinding(
             path=probe["path"],
             label=probe["label"],
             status_code=status_code,
             exposed=True,
-            severity=probe["severity"],
+            severity=sev,
             description=probe["description"],
             remediation=probe.get("remediation"),
             confidence=conf,
+            penalty=PENALTY[sev] if sev != "info" else 0,
         )
 
     if status_code == 403 and probe["severity"] in ("high", "medium"):
@@ -271,12 +224,10 @@ async def _probe(client: httpx.AsyncClient, base_url: str, probe: dict) -> Expos
             status_code=status_code,
             exposed=True,
             severity="low",
-            description=(
-                probe["description"] +
-                " Access is currently blocked (HTTP 403) — restricted but the path exists."
-            ),
+            description=probe["description"] + " Access is currently blocked (HTTP 403).",
             remediation=probe.get("remediation"),
             confidence="possible",
+            penalty=PENALTY["low"],
         )
 
     return None
@@ -287,59 +238,42 @@ async def _check_directory_listing(client: httpx.AsyncClient, base_url: str) -> 
         resp = await client.get(base_url + "/")
     except httpx.RequestError:
         return None
-    if resp.status_code == 200:
-        body = resp.text
-        if any(marker in body for marker in _DIRECTORY_LISTING_MARKERS):
-            return ExposureFinding(
-                path="/",
-                label="Open directory listing",
-                status_code=200,
-                exposed=True,
-                severity="medium",
-                description=(
-                    "The web root appears to be returning a directory listing, "
-                    "allowing visitors to browse files without knowing specific URLs."
-                ),
-                remediation=(
-                    "Disable directory indexing.\n"
-                    "nginx:  autoindex off;\n"
-                    "Apache: Options -Indexes"
-                ),
-                confidence="confirmed",
-            )
+    if resp.status_code == 200 and any(m in resp.text for m in _DIRECTORY_LISTING_MARKERS):
+        return ExposureFinding(
+            path="/",
+            label="Open directory listing",
+            status_code=200,
+            exposed=True,
+            severity="medium",
+            description="The web root returns a directory listing, allowing visitors to browse files.",
+            remediation="nginx: autoindex off; Apache: Options -Indexes",
+            confidence="confirmed",
+            penalty=PENALTY["medium"],
+        )
     return None
 
 
 async def scan_exposure(domain: str) -> ExposureScanResult:
     base_url = f"https://{domain}"
 
-    async with httpx.AsyncClient(
-        follow_redirects=False,
-        timeout=_TIMEOUT,
-        headers=_HEADERS,
-    ) as client:
+    async with httpx.AsyncClient(follow_redirects=False, timeout=_TIMEOUT, headers=_HEADERS) as client:
         tasks = [_probe(client, base_url, p) for p in _PROBES]
         tasks.append(_check_directory_listing(client, base_url))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    findings: list[ExposureFinding] = [
-        r for r in results if isinstance(r, ExposureFinding)
-    ]
+    findings: list[ExposureFinding] = [r for r in results if isinstance(r, ExposureFinding)]
 
-    # Grouped penalty: related findings share a base penalty + 2pts per extra
+    # Grouped penalty: related findings share a base + 2pts per extra
     group_counts: dict[str, int] = defaultdict(int)
     for f in findings:
-        if f.exposed and f.status_code == 200 and f.severity not in ("info",):
-            group = _PATH_GROUP.get(f.path, "other")
-            group_counts[group] += 1
+        if f.exposed and f.status_code == 200 and f.severity != "info":
+            group_counts[_PATH_GROUP.get(f.path, "other")] += 1
 
     total_penalty = 0
     critical_triggers: list[str] = []
     for group_name, count in group_counts.items():
         spec = _GROUP_SPEC.get(group_name, _GROUP_SPEC["other"])
-        base = PENALTY[spec["severity"]]
-        extra = max(0, count - 1) * 2
-        total_penalty += base + extra
+        total_penalty += PENALTY[spec["severity"]] + max(0, count - 1) * 2
         if spec["trigger"] and spec["trigger"] not in critical_triggers:
             critical_triggers.append(spec["trigger"])
 

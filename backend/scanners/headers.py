@@ -24,8 +24,7 @@ REQUIRED_HEADERS: list[dict] = [
         ),
         "remediation": (
             "Add a Content-Security-Policy header. Start with \"default-src 'self'\" "
-            "and broaden only what your app needs. Use a CSP evaluator to validate "
-            "before deploying."
+            "and broaden only what your app needs."
         ),
     },
     {
@@ -36,10 +35,7 @@ REQUIRED_HEADERS: list[dict] = [
             "HSTS is missing. Without it, browsers may connect over plain HTTP "
             "enabling protocol-downgrade and man-in-the-middle attacks."
         ),
-        "remediation": (
-            "Add Strict-Transport-Security: max-age=31536000; includeSubDomains. "
-            "Only set this after confirming HTTPS works everywhere."
-        ),
+        "remediation": "Add Strict-Transport-Security: max-age=31536000; includeSubDomains.",
     },
     {
         "header": "x-frame-options",
@@ -49,10 +45,7 @@ REQUIRED_HEADERS: list[dict] = [
             "X-Frame-Options is missing. Without it, the page can be embedded in "
             "an iframe on an attacker-controlled site, enabling clickjacking attacks."
         ),
-        "remediation": (
-            "Add X-Frame-Options: DENY (or SAMEORIGIN). "
-            "Alternatively, set frame-ancestors in your CSP policy."
-        ),
+        "remediation": "Add X-Frame-Options: DENY (or SAMEORIGIN). Alternatively, set frame-ancestors in your CSP.",
     },
     {
         "header": "x-content-type-options",
@@ -95,10 +88,7 @@ LEAK_HEADERS: list[dict] = [
             "The Server header exposes web server software and version. "
             "Attackers use this to look up known vulnerabilities for that exact version."
         ),
-        "remediation": (
-            "Suppress or obscure the Server header. "
-            "nginx: server_tokens off; Apache: ServerTokens Prod; ServerSignature Off"
-        ),
+        "remediation": "nginx: server_tokens off; Apache: ServerTokens Prod; ServerSignature Off",
     },
     {
         "header": "x-powered-by",
@@ -145,6 +135,7 @@ def _check_hsts_value(value: str) -> HeaderFinding | None:
             value=value,
             description="HSTS header is present but missing max-age directive.",
             remediation="Set max-age to at least 15552000 (180 days).",
+            penalty=PENALTY["high"],
         )
     try:
         max_age = int(lower.split("max-age=")[1].split(";")[0].strip())
@@ -156,6 +147,7 @@ def _check_hsts_value(value: str) -> HeaderFinding | None:
                 value=value,
                 description=f"HSTS max-age is only {max_age} seconds (less than 180 days).",
                 remediation="Increase max-age to at least 15552000 (180 days).",
+                penalty=PENALTY["medium"],
             )
     except (IndexError, ValueError):
         pass
@@ -224,6 +216,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
 
         if value is None:
             if key == "content-security-policy" and csp_ro_value:
+                p = PENALTY["medium"]
                 findings.append(HeaderFinding(
                     header=spec["display"],
                     status="weak",
@@ -237,8 +230,9 @@ async def scan_headers(domain: str) -> HeaderScanResult:
                         "Switch Content-Security-Policy-Report-Only to Content-Security-Policy "
                         "once your policy is validated."
                     ),
+                    penalty=p,
                 ))
-                total_penalty += PENALTY["medium"]
+                total_penalty += p
             elif key == "x-frame-options" and has_frame_ancestors:
                 findings.append(HeaderFinding(
                     header=spec["display"],
@@ -247,8 +241,10 @@ async def scan_headers(domain: str) -> HeaderScanResult:
                     value="(via CSP frame-ancestors)",
                     description="Frame embedding is restricted via the CSP frame-ancestors directive.",
                     remediation="No action required.",
+                    penalty=0,
                 ))
             else:
+                p = PENALTY[spec["severity"]]
                 findings.append(HeaderFinding(
                     header=spec["display"],
                     status="missing",
@@ -256,8 +252,9 @@ async def scan_headers(domain: str) -> HeaderScanResult:
                     value=None,
                     description=spec["description"],
                     remediation=spec["remediation"],
+                    penalty=p,
                 ))
-                total_penalty += PENALTY[spec["severity"]]
+                total_penalty += p
         else:
             weak_finding = None
             if key == "strict-transport-security":
@@ -265,7 +262,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
 
             if weak_finding:
                 findings.append(weak_finding)
-                total_penalty += PENALTY[weak_finding.severity]
+                total_penalty += weak_finding.penalty
             else:
                 findings.append(HeaderFinding(
                     header=spec["display"],
@@ -274,6 +271,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
                     value=value,
                     description=f"{spec['display']} is properly set.",
                     remediation="No action required.",
+                    penalty=0,
                 ))
 
     for spec in LEAK_HEADERS:
@@ -281,16 +279,17 @@ async def scan_headers(domain: str) -> HeaderScanResult:
         if value:
             if spec.get("versioned_only") and not _VERSION_RE.search(value):
                 continue
+            p = PENALTY[spec["severity"]]
             information_leaks.append(InformationLeakFinding(
                 header=spec["header"],
                 value=value,
                 severity=spec["severity"],
                 description=spec["description"],
                 remediation=spec["remediation"],
+                penalty=p,
             ))
-            total_penalty += PENALTY[spec["severity"]]
+            total_penalty += p
 
-    # Bonus credits for optional hardening headers — only when base penalty is already low
     if total_penalty <= 20:
         for bonus_header in _BONUS_HEADERS:
             if bonus_header in lower_headers:

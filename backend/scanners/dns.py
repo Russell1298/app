@@ -2,7 +2,7 @@
 DNS and email authentication scanner.
 
 Performs passive DNS lookups only. DNSSEC is reported as informational only
-(not penalised) per v2 spec — too many legitimate large sites skip it.
+(not penalised) per v2 spec.
 """
 
 import asyncio
@@ -52,6 +52,7 @@ def _check_a(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
                 severity=None,
                 description=f"Domain resolves to {len(values)} address(es): {', '.join(values[:5])}",
                 remediation=None,
+                penalty=0,
             ),
         )
     return (
@@ -62,6 +63,7 @@ def _check_a(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
             severity="high",
             description="Domain does not resolve to any IP address.",
             remediation="Add an A or AAAA record in your DNS zone pointing to your server.",
+            penalty=PENALTY["high"],
         ),
     )
 
@@ -71,23 +73,15 @@ def _check_mx(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
     if values:
         return (
             DNSRecord(record_type="MX", values=values),
-            DNSFinding(
-                check="MX records",
-                status="info",
-                severity=None,
-                description=f"Mail servers found: {', '.join(values)}",
-                remediation=None,
-            ),
+            DNSFinding(check="MX records", status="info", severity=None,
+                       description=f"Mail servers found: {', '.join(values)}",
+                       remediation=None, penalty=0),
         )
     return (
         None,
-        DNSFinding(
-            check="MX records",
-            status="info",
-            severity=None,
-            description="No MX records found. If this domain sends or receives email, MX records are required.",
-            remediation="Add MX records if the domain handles email.",
-        ),
+        DNSFinding(check="MX records", status="info", severity=None,
+                   description="No MX records found.",
+                   remediation="Add MX records if the domain handles email.", penalty=0),
     )
 
 
@@ -96,31 +90,21 @@ def _check_ns(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
     if values:
         return (
             DNSRecord(record_type="NS", values=values),
-            DNSFinding(
-                check="NS records",
-                status="info",
-                severity=None,
-                description=f"Authoritative nameservers: {', '.join(values)}",
-                remediation=None,
-            ),
+            DNSFinding(check="NS records", status="info", severity=None,
+                       description=f"Authoritative nameservers: {', '.join(values)}",
+                       remediation=None, penalty=0),
         )
     return (
         None,
-        DNSFinding(
-            check="NS records",
-            status="warn",
-            severity="low",
-            description="Could not retrieve NS records for this domain.",
-            remediation=None,
-        ),
+        DNSFinding(check="NS records", status="warn", severity="low",
+                   description="Could not retrieve NS records for this domain.",
+                   remediation=None, penalty=PENALTY["low"]),
     )
 
 
 def _check_txt(domain: str) -> DNSRecord | None:
     values = _txt_records(domain)
-    if values:
-        return DNSRecord(record_type="TXT", values=values)
-    return None
+    return DNSRecord(record_type="TXT", values=values) if values else None
 
 
 def _check_spf(domain: str) -> DNSFinding:
@@ -136,11 +120,8 @@ def _check_spf(domain: str) -> DNSFinding:
                 "No SPF record found. Without SPF, anyone can send email claiming to "
                 "be from this domain, enabling phishing and spam attacks."
             ),
-            remediation=(
-                "Add a TXT record: v=spf1 include:<your-mail-provider> -all\n"
-                "Replace <your-mail-provider> with your actual email service "
-                "(e.g. include:_spf.google.com for Google Workspace)."
-            ),
+            remediation="Add a TXT record: v=spf1 include:<your-mail-provider> -all",
+            penalty=PENALTY["high"],
         )
 
     if len(spf_records) > 1:
@@ -148,11 +129,9 @@ def _check_spf(domain: str) -> DNSFinding:
             check="SPF",
             status="fail",
             severity="medium",
-            description=(
-                f"Multiple SPF records found ({len(spf_records)}). "
-                "RFC 7208 requires exactly one SPF record."
-            ),
+            description=f"Multiple SPF records found ({len(spf_records)}). RFC 7208 requires exactly one.",
             remediation="Merge all SPF mechanisms into a single TXT record.",
+            penalty=PENALTY["medium"],
         )
 
     spf = spf_records[0]
@@ -162,44 +141,32 @@ def _check_spf(domain: str) -> DNSFinding:
             check="SPF",
             status="fail",
             severity="high",
-            description=(
-                f"SPF record uses '+all' which passes all senders: {spf!r}. "
-                "This is effectively no protection — anyone can spoof your domain."
-            ),
-            remediation="Change '+all' to '-all' to reject mail from unlisted senders.",
+            description=f"SPF uses '+all' — anyone can spoof your domain: {spf!r}",
+            remediation="Change '+all' to '-all'.",
+            penalty=PENALTY["high"],
         )
-
     if "?all" in spf:
         return DNSFinding(
             check="SPF",
             status="warn",
             severity="medium",
-            description=(
-                f"SPF record uses '?all' (neutral) which provides no rejection: {spf!r}. "
-                "Spoofed mail from your domain will not be rejected."
-            ),
-            remediation="Change '?all' to '-all' to enforce rejection of unauthorised senders.",
+            description=f"SPF uses '?all' (neutral) — no rejection of spoofed mail: {spf!r}",
+            remediation="Change '?all' to '-all'.",
+            penalty=PENALTY["medium"],
         )
-
     if "~all" in spf:
         return DNSFinding(
             check="SPF",
             status="warn",
             severity="low",
-            description=(
-                f"SPF uses '~all' (softfail): {spf!r}. "
-                "Unauthorised senders are flagged but not always rejected."
-            ),
-            remediation="Change '~all' to '-all' once legitimate mail sources are all listed.",
+            description=f"SPF uses '~all' (softfail) — unauthorised senders flagged but not rejected: {spf!r}",
+            remediation="Change '~all' to '-all' once legitimate mail sources are listed.",
+            penalty=PENALTY["low"],
         )
 
-    return DNSFinding(
-        check="SPF",
-        status="pass",
-        severity=None,
-        description=f"SPF record is present and uses a strict policy: {spf!r}",
-        remediation=None,
-    )
+    return DNSFinding(check="SPF", status="pass", severity=None,
+                     description=f"SPF record is present with a strict policy: {spf!r}",
+                     remediation=None, penalty=0)
 
 
 def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
@@ -215,15 +182,14 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
                 status="fail",
                 severity="high",
                 description=(
-                    f"No DMARC record found at _dmarc.{domain}. "
-                    "Without DMARC, mail receivers have no instruction on what to do "
-                    "with failing messages, leaving your domain open to impersonation."
+                    f"No DMARC record found at _dmarc.{domain}. Without DMARC, mail receivers "
+                    "have no instruction on what to do with failing messages."
                 ),
                 remediation=(
-                    f"Add a TXT record at _dmarc.{domain}:\n"
-                    f"v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@{domain}\n"
-                    "Start with p=none to monitor, then move to p=quarantine, then p=reject."
+                    f"Add a TXT record at _dmarc.{domain}: "
+                    f"v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@{domain}"
                 ),
+                penalty=PENALTY["high"],
             ),
         )
 
@@ -238,48 +204,25 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
             break
 
     if policy == "none":
-        return (
-            record,
-            DNSFinding(
-                check="DMARC",
-                status="warn",
-                severity="medium",
-                description=(
-                    f"DMARC record is present but policy is 'none': {dmarc!r}. "
-                    "p=none only monitors — failing messages are not quarantined or rejected."
-                ),
-                remediation=(
-                    "Review DMARC aggregate reports, then change p=none to p=quarantine, "
-                    "and later p=reject."
-                ),
-            ),
-        )
-
+        return (record, DNSFinding(
+            check="DMARC", status="warn", severity="medium",
+            description=f"DMARC policy is 'none' — failing messages are not quarantined or rejected: {dmarc!r}",
+            remediation="Change p=none to p=quarantine, then p=reject.",
+            penalty=PENALTY["medium"],
+        ))
     if policy == "quarantine":
-        return (
-            record,
-            DNSFinding(
-                check="DMARC",
-                status="warn",
-                severity="low",
-                description=(
-                    f"DMARC policy is 'quarantine': {dmarc!r}. "
-                    "Failing messages go to spam rather than being rejected."
-                ),
-                remediation="Consider upgrading to p=reject once you confirm no legitimate mail is failing.",
-            ),
-        )
+        return (record, DNSFinding(
+            check="DMARC", status="warn", severity="low",
+            description=f"DMARC policy is 'quarantine' — failing messages go to spam: {dmarc!r}",
+            remediation="Consider upgrading to p=reject.",
+            penalty=PENALTY["low"],
+        ))
 
-    return (
-        record,
-        DNSFinding(
-            check="DMARC",
-            status="pass",
-            severity=None,
-            description=f"DMARC record is present with a strict policy (p={policy}): {dmarc!r}",
-            remediation=None,
-        ),
-    )
+    return (record, DNSFinding(
+        check="DMARC", status="pass", severity=None,
+        description=f"DMARC record present with strict policy (p={policy}): {dmarc!r}",
+        remediation=None, penalty=0,
+    ))
 
 
 def _check_caa(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
@@ -287,70 +230,43 @@ def _check_caa(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
     if values:
         return (
             DNSRecord(record_type="CAA", values=values),
-            DNSFinding(
-                check="CAA",
-                status="pass",
-                severity=None,
-                description=f"CAA records restrict certificate issuance to: {', '.join(values)}",
-                remediation=None,
-            ),
+            DNSFinding(check="CAA", status="pass", severity=None,
+                       description=f"CAA records restrict certificate issuance to: {', '.join(values)}",
+                       remediation=None, penalty=0),
         )
     return (
         None,
         DNSFinding(
-            check="CAA",
-            status="warn",
-            severity="low",
-            description=(
-                "No CAA records found. Without CAA, any certificate authority can issue "
-                "TLS certificates for this domain."
-            ),
-            remediation=(
-                "Add CAA records listing only the CA(s) you use, e.g.:\n"
-                '0 issue \"letsencrypt.org\"\n'
-                f'0 iodef \"mailto:security@{domain}\"'
-            ),
+            check="CAA", status="warn", severity="low",
+            description="No CAA records. Any CA can issue certificates for this domain.",
+            remediation='Add: 0 issue "letsencrypt.org"',
+            penalty=PENALTY["low"],
         ),
     )
 
 
 def _check_dnssec(domain: str) -> DNSFinding:
-    """DNSSEC is informational only in v2 — not penalised."""
+    """Informational only in v2 — not penalised."""
     ds_values = _query(domain, "DS")
     if ds_values:
-        return DNSFinding(
-            check="DNSSEC",
-            status="pass",
-            severity=None,
-            description="DNSSEC DS record found — DNS responses for this domain are signed.",
-            remediation=None,
-        )
+        return DNSFinding(check="DNSSEC", status="pass", severity=None,
+                         description="DNSSEC DS record found — DNS responses are signed.",
+                         remediation=None, penalty=0)
     dnskey_values = _query(domain, "DNSKEY")
     if dnskey_values:
-        return DNSFinding(
-            check="DNSSEC",
-            status="pass",
-            severity=None,
-            description="DNSSEC DNSKEY record found — DNS responses are cryptographically signed.",
-            remediation=None,
-        )
+        return DNSFinding(check="DNSSEC", status="pass", severity=None,
+                         description="DNSSEC DNSKEY record found — DNS responses are signed.",
+                         remediation=None, penalty=0)
     return DNSFinding(
-        check="DNSSEC",
-        status="info",
-        severity=None,
-        description=(
-            "DNSSEC is not configured. DNS responses are not cryptographically signed. "
-            "Many large legitimate sites skip this — reported for information only."
-        ),
-        remediation="Consider enabling DNSSEC through your domain registrar or DNS provider.",
+        check="DNSSEC", status="info", severity=None,
+        description="DNSSEC is not configured. Reported for information only — not penalised.",
+        remediation="Consider enabling DNSSEC through your domain registrar.",
+        penalty=0,
     )
 
 
 def _score(findings: list[DNSFinding]) -> tuple[int, str]:
-    total = 0
-    for f in findings:
-        if f.status in ("fail", "warn") and f.severity:
-            total += PENALTY[f.severity]
+    total = sum(f.penalty for f in findings)
     risk_score = scanner_score(total, "dns")
     return risk_score, risk_level(risk_score)
 
@@ -368,35 +284,23 @@ async def scan_dns(domain: str) -> DNSScanResult:
         caa_record, caa_finding = _check_caa(domain)
         dnssec_finding = _check_dnssec(domain)
         return (
-            a_record, a_finding,
-            mx_record, mx_finding,
-            ns_record, ns_finding,
-            txt_record,
-            spf_finding,
-            dmarc_record, dmarc_finding,
-            caa_record, caa_finding,
-            dnssec_finding,
+            a_record, a_finding, mx_record, mx_finding,
+            ns_record, ns_finding, txt_record,
+            spf_finding, dmarc_record, dmarc_finding,
+            caa_record, caa_finding, dnssec_finding,
         )
 
     (
-        a_record, a_finding,
-        mx_record, mx_finding,
-        ns_record, ns_finding,
-        txt_record,
-        spf_finding,
-        dmarc_record, dmarc_finding,
-        caa_record, caa_finding,
-        dnssec_finding,
+        a_record, a_finding, mx_record, mx_finding,
+        ns_record, ns_finding, txt_record,
+        spf_finding, dmarc_record, dmarc_finding,
+        caa_record, caa_finding, dnssec_finding,
     ) = await loop.run_in_executor(None, _run_all)
 
     records = [r for r in [a_record, mx_record, ns_record, txt_record, dmarc_record, caa_record] if r]
     findings = [a_finding, mx_finding, ns_finding, spf_finding, dmarc_finding, caa_finding, dnssec_finding]
 
     risk_score, level = _score(findings)
-
-    fail_count = sum(1 for f in findings if f.status == "fail")
-    warn_count = sum(1 for f in findings if f.status == "warn")
-    pass_count = sum(1 for f in findings if f.status == "pass")
 
     return DNSScanResult(
         domain=domain,
@@ -408,8 +312,8 @@ async def scan_dns(domain: str) -> DNSScanResult:
         critical_triggers=[],
         summary={
             "checks_run": len(findings),
-            "fail": fail_count,
-            "warn": warn_count,
-            "pass": pass_count,
+            "fail": sum(1 for f in findings if f.status == "fail"),
+            "warn": sum(1 for f in findings if f.status == "warn"),
+            "pass": sum(1 for f in findings if f.status == "pass"),
         },
     )

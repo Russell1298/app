@@ -25,6 +25,7 @@ class HeaderFinding(BaseModel):
     value: str | None
     description: str
     remediation: str
+    penalty: int = 0
 
 
 class InformationLeakFinding(BaseModel):
@@ -33,6 +34,7 @@ class InformationLeakFinding(BaseModel):
     severity: Literal["low", "medium", "high"]
     description: str
     remediation: str
+    penalty: int = 0
 
 
 class HeaderScanResult(BaseModel):
@@ -58,6 +60,7 @@ class DNSFinding(BaseModel):
     severity: Literal["low", "medium", "high"] | None
     description: str
     remediation: str | None
+    penalty: int = 0
 
 
 class DNSScanResult(BaseModel):
@@ -80,6 +83,7 @@ class ExposureFinding(BaseModel):
     description: str
     remediation: str | None
     confidence: Literal["confirmed", "likely", "possible"] | None = None
+    penalty: int = 0
 
 
 class ExposureScanResult(BaseModel):
@@ -128,6 +132,7 @@ class SSLFinding(BaseModel):
     severity: Literal["low", "medium", "high"] | None
     description: str
     remediation: str | None
+    penalty: int = 0
 
 
 class SSLScanResult(BaseModel):
@@ -162,6 +167,7 @@ class SecretFinding(BaseModel):
     location: str
     source_url: str
     match_preview: str
+    penalty: int = 0
 
 
 class SecretScanResult(BaseModel):
