@@ -157,6 +157,7 @@ def _check_hsts_value(value: str) -> HeaderFinding | None:
 async def scan_headers(domain: str) -> HeaderScanResult:
     url = f"https://{domain}"
     headers_received: dict[str, str] = {}
+    redirect_history: list[httpx.Response] = []
     fetch_error: str | None = None
     scanned_url = url
 
@@ -169,6 +170,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
             response = await client.get(url)
             headers_received = dict(response.headers)
             scanned_url = str(response.url)
+            redirect_history = list(response.history)
     except httpx.ConnectError:
         try:
             url = f"http://{domain}"
@@ -180,6 +182,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
                 response = await client.get(url)
                 headers_received = dict(response.headers)
                 scanned_url = str(response.url)
+                redirect_history = list(response.history)
         except httpx.RequestError as e:
             fetch_error = str(e)
             scanned_url = url
@@ -201,6 +204,16 @@ async def scan_headers(domain: str) -> HeaderScanResult:
         )
 
     lower_headers = {k.lower(): v for k, v in headers_received.items()}
+
+    # HSTS is sometimes set only on an intermediate redirect response (e.g. google.com
+    # sets it on the https://google.com -> https://www.google.com redirect, not on the
+    # final page). Walk the history and use the first HSTS value found.
+    if "strict-transport-security" not in lower_headers:
+        for hist_resp in redirect_history:
+            hsts_val = hist_resp.headers.get("strict-transport-security")
+            if hsts_val:
+                lower_headers["strict-transport-security"] = hsts_val
+                break
 
     csp_value = lower_headers.get("content-security-policy", "")
     csp_ro_value = lower_headers.get("content-security-policy-report-only", "")
