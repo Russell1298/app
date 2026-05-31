@@ -4,6 +4,9 @@ Exposure scanner.
 Makes targeted passive HTTP GET requests to well-known paths that should
 never be publicly accessible. Groups related findings and emits
 critical_triggers for the overall score cap logic.
+
+Only HTTP 200 responses count as exposures. HTTP 403 means the path exists
+but is correctly restricted — shown as informational, never penalised.
 """
 
 import re
@@ -217,18 +220,21 @@ async def _probe(client: httpx.AsyncClient, base_url: str, probe: dict) -> Expos
             penalty=PENALTY[sev] if sev != "info" else 0,
         )
 
-    if status_code == 403 and probe["severity"] in ("high", "medium"):
-        return ExposureFinding(
-            path=probe["path"],
-            label=probe["label"],
-            status_code=status_code,
-            exposed=True,
-            severity="low",
-            description=probe["description"] + " Access is currently blocked (HTTP 403).",
-            remediation=probe.get("remediation"),
-            confidence="possible",
-            penalty=PENALTY["low"],
-        )
+    if status_code == 403:
+        # Path exists but access is correctly restricted — informational only, no penalty.
+        # Only report 403 for high-severity paths so the user can see the check ran.
+        if probe["severity"] in ("high", "medium"):
+            return ExposureFinding(
+                path=probe["path"],
+                label=probe["label"] + " (blocked)",
+                status_code=status_code,
+                exposed=False,
+                severity="info",
+                description=f"Access to {probe['path']} is correctly blocked (HTTP 403).",
+                remediation=None,
+                confidence="confirmed",
+                penalty=0,
+            )
 
     return None
 
@@ -263,7 +269,7 @@ async def scan_exposure(domain: str) -> ExposureScanResult:
 
     findings: list[ExposureFinding] = [r for r in results if isinstance(r, ExposureFinding)]
 
-    # Grouped penalty: related findings share a base + 2pts per extra
+    # Only HTTP 200 findings count toward the grouped penalty and triggers
     group_counts: dict[str, int] = defaultdict(int)
     for f in findings:
         if f.exposed and f.status_code == 200 and f.severity != "info":
@@ -281,7 +287,7 @@ async def scan_exposure(domain: str) -> ExposureScanResult:
     level = risk_level(risk)
 
     exposed = [f for f in findings if f.exposed and f.severity != "info"]
-    info    = [f for f in findings if f.severity == "info"]
+    info    = [f for f in findings if f.severity == "info" or not f.exposed]
 
     return ExposureScanResult(
         domain=domain,
