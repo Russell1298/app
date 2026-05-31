@@ -11,10 +11,18 @@ class ScanRequest(BaseModel):
     @classmethod
     def clean_domain(cls, v: str) -> str:
         v = v.strip().lower()
+        # Strip scheme if user pastes a full URL
         v = re.sub(r"^https?://", "", v)
+        # Strip trailing slashes and paths
         v = v.split("/")[0]
-        if not re.match(r"^[a-z0-9][a-z0-9\-\.]{0,252}[a-z0-9]$", v):
-            raise ValueError("Invalid domain name")
+        # Must be a valid domain with at least one dot and a TLD of 2+ chars.
+        # Rejects single-label names like "notavaliddomain" or bare IPs without dots.
+        if not re.match(
+            r"^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$", v
+        ):
+            raise ValueError(
+                "Invalid domain name. Must be a fully-qualified domain such as example.com."
+            )
         return v
 
 
