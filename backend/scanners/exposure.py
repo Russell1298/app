@@ -95,6 +95,20 @@ _PROBES: list[dict] = [
         "remediation": "Remove phpMyAdmin from the webroot or restrict it to localhost. Use an SSH tunnel to access it.",
     },
     {
+        "path": "/adminer.php",
+        "label": "Adminer database tool accessible",
+        "severity": "medium",
+        "description": "An Adminer database management script appears to be publicly accessible. Without IP restriction it provides a browser-based interface to your database.",
+        "remediation": "Remove adminer.php from the webroot or restrict access by IP. Use an SSH tunnel to access it.",
+    },
+    {
+        "path": "/admin/",
+        "label": "Generic admin panel accessible",
+        "severity": "medium",
+        "description": "An /admin/ path returned 200. If unprotected, this admin panel could be targeted for credential-stuffing or brute-force attacks.",
+        "remediation": "Restrict the admin interface to specific IP ranges or move it behind a VPN.",
+    },
+    {
         "path": "/server-status",
         "label": "Apache server-status accessible",
         "severity": "medium",
@@ -144,10 +158,12 @@ _PATH_GROUP: dict[str, str] = {
     "/.env.local":       "env",
     "/.git/HEAD":        "git",
     "/phpmyadmin/":      "db_admin",
+    "/adminer.php":      "db_admin",
     "/_profiler":        "debug_panel",
     "/telescope":        "debug_panel",
     "/debug":            "debug_panel",
     "/admin":            "admin",
+    "/admin/":           "admin",
     "/wp-admin/":        "admin",
     "/wp-login.php":     "admin",
     "/server-status":    "server_info",
@@ -181,7 +197,7 @@ _CONFIRMED_SIGNATURES: dict[str, list[str]] = {
     "/server-info":   ["Apache Server Information", "Server Settings"],
 }
 
-_POSSIBLE_ONLY_PATHS = {"/admin", "/wp-admin/", "/wp-login.php", "/debug"}
+_POSSIBLE_ONLY_PATHS = {"/admin", "/admin/", "/wp-admin/", "/wp-login.php", "/adminer.php", "/debug"}
 
 
 def _confidence(path: str, body: str) -> str:

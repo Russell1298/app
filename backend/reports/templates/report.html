@@ -519,7 +519,8 @@
       <div class="cover-toc-item"><span class="cover-toc-num">03</span> Attack Surface</div>
       <div class="cover-toc-item"><span class="cover-toc-num">04</span> Security Findings</div>
       <div class="cover-toc-item"><span class="cover-toc-num">05</span> Technical Appendix</div>
-      <div class="cover-toc-item"><span class="cover-toc-num">06</span> Remediation Roadmap</div>
+      <div class="cover-toc-item"><span class="cover-toc-num">06</span> Scanner Breakdown</div>
+      <div class="cover-toc-item"><span class="cover-toc-num">07</span> Remediation Roadmap</div>
     </div>
   </div>
 
@@ -1109,7 +1110,52 @@
 
 
 <!-- ══════════════════════════════════════════════════════════
-     SECTION 7 — REMEDIATION ROADMAP
+     SECTION 7 — SCANNER BREAKDOWN
+══════════════════════════════════════════════════════════ -->
+<div class="content page-break">
+
+  <div class="page-heading">Scanner Breakdown</div>
+  <div class="page-subheading">Per-scanner risk score and failing finding count</div>
+
+  <div class="section">
+    <table>
+      <tr>
+        <th>Scanner</th>
+        <th>Risk Score</th>
+        <th>Risk Level</th>
+        <th>Failing Findings</th>
+      </tr>
+      {% for label, sc, level in scanner_scores %}
+      {% set scanner_key = label | lower | replace(' / ', '_') | replace(' & ', '_') | replace(' ', '_') %}
+      <tr>
+        <td><strong>{{ label }}</strong></td>
+        <td class="mono">{{ sc }} / 100</td>
+        <td><span class="score-card-badge badge-sm-{{ level }}">{{ level | upper }}</span></td>
+        <td>
+          {% if label == 'Security Headers' %}
+            {{ result.headers.summary.get('missing', 0) + result.headers.summary.get('weak', 0) }}
+          {% elif label == 'DNS &amp; Email' or label == 'DNS & Email' %}
+            {{ result.dns.summary.get('fail', 0) }}
+          {% elif label == 'SSL / TLS' %}
+            {{ result.ssl.summary.get('fail', 0) }}
+          {% elif label == 'Exposure' %}
+            {{ result.exposure.summary.get('exposed', 0) }}
+          {% elif label == 'Secrets' %}
+            {{ result.secrets.findings | length if result.secrets else 0 }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     SECTION 8 — REMEDIATION ROADMAP
 ══════════════════════════════════════════════════════════ -->
 <div class="content page-break">
 

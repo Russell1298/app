@@ -192,6 +192,31 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
         findings.append(SSLFinding(check="TLS 1.1", status="pass", severity=None,
                                    description="TLS 1.1 is correctly disabled.", remediation=None, penalty=0))
 
+    # Aggregate "Legacy TLS" finding when either TLS 1.0 or TLS 1.1 is accepted.
+    # This is a separate, lower-penalty signal that groups both deprecated versions
+    # into a single actionable remediation note independent of the per-version findings.
+    if version_map.get("TLS 1.0") is True or version_map.get("TLS 1.1") is True:
+        legacy = []
+        if version_map.get("TLS 1.0") is True:
+            legacy.append("TLS 1.0")
+        if version_map.get("TLS 1.1") is True:
+            legacy.append("TLS 1.1")
+        findings.append(SSLFinding(
+            check="Legacy TLS supported",
+            status="fail",
+            severity="medium",
+            description=(
+                f"This server accepts connections using {' and '.join(legacy)}, "
+                "which are deprecated and vulnerable to downgrade attacks. "
+                "Disable them in your web server config."
+            ),
+            remediation=(
+                "TLS 1.0/1.1 are deprecated and vulnerable to downgrade attacks. "
+                "Disable them in your web server config."
+            ),
+            penalty=10,
+        ))
+
     tls12 = version_map.get("TLS 1.2")
     tls13 = version_map.get("TLS 1.3")
 

@@ -6,11 +6,25 @@ Performs passive DNS lookups only. DNSSEC is reported as informational only
 """
 
 import asyncio
+import httpx
 import dns.resolver
 import dns.exception
 import dns.rdatatype
 from models.scan import DNSRecord, DNSFinding, DNSScanResult, utc_now_iso
 from scoring_config import PENALTY, scanner_score, risk_level
+
+# Cloud service patterns that indicate a potentially dangling CNAME target.
+_CLOUD_CNAME_PATTERNS = (
+    ".s3.amazonaws.com",
+    ".azurewebsites.net",
+    ".github.io",
+    ".herokuapp.com",
+    ".netlify.app",
+    ".vercel.app",
+    ".ghost.io",
+    ".shopify.com",
+    ".fastly.net",
+)
 
 _RESOLVER = dns.resolver.Resolver()
 _RESOLVER.timeout = 5
@@ -265,13 +279,83 @@ def _check_dnssec(domain: str) -> DNSFinding:
     )
 
 
+def _cname_targets(domain: str) -> list[str]:
+    """Return CNAME record values for *domain* (empty list if none)."""
+    try:
+        answers = _RESOLVER.resolve(domain, "CNAME")
+        return [r.to_text().rstrip(".") for r in answers]
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+        return []
+    except dns.exception.DNSException:
+        return []
+
+
+def _is_cloud_cname(target: str) -> bool:
+    """Return True when *target* matches a known cloud service CNAME pattern."""
+    tgt = target.lower()
+    return any(pattern in tgt for pattern in _CLOUD_CNAME_PATTERNS)
+
+
+def _cname_responds(target: str) -> bool:
+    """Return True when the CNAME target returns an HTTP 200 response (i.e. not dangling)."""
+    for scheme in ("https", "http"):
+        url = f"{scheme}://{target}/"
+        try:
+            resp = httpx.get(url, timeout=6, follow_redirects=True,
+                             headers={"User-Agent": "SecurityScanner/1.0 (defensive assessment)"})
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _check_subdomain_takeovers(subdomains: list[str]) -> list[DNSFinding]:
+    """
+    For each subdomain that has a CNAME pointing at a cloud service, verify
+    whether the CNAME target is reachable. If it returns 404/503 or no response,
+    flag it as a potential subdomain takeover.
+    """
+    findings: list[DNSFinding] = []
+    for sub in subdomains:
+        targets = _cname_targets(sub)
+        for target in targets:
+            if not _is_cloud_cname(target):
+                continue
+            # The CNAME points at a cloud service — check whether it's claimed
+            if not _cname_responds(target):
+                findings.append(DNSFinding(
+                    check=f"Potential subdomain takeover: {sub}",
+                    status="fail",
+                    severity="high",
+                    description=(
+                        f"{sub} has a CNAME pointing to {target}, which appears to be "
+                        "an unclaimed cloud service. An attacker may be able to register "
+                        "this service and serve malicious content under your subdomain."
+                    ),
+                    remediation=(
+                        f"Either remove the CNAME record for {sub} or claim the "
+                        f"cloud resource at {target} to prevent takeover."
+                    ),
+                    penalty=30,
+                ))
+    return findings
+
+
 def _score(findings: list[DNSFinding]) -> tuple[int, str]:
     total = sum(f.penalty for f in findings)
     risk_score = scanner_score(total, "dns")
     return risk_score, risk_level(risk_score)
 
 
-async def scan_dns(domain: str) -> DNSScanResult:
+async def scan_dns(domain: str, subdomains: list[str] | None = None) -> DNSScanResult:
+    """
+    Scan DNS/email-auth for *domain*.
+
+    Optionally accepts a *subdomains* list (e.g. from the subdomain scanner) to
+    check for dangling CNAME / subdomain-takeover risks. When omitted, only the
+    apex domain checks are performed.
+    """
     loop = asyncio.get_event_loop()
 
     def _run_all() -> tuple:
@@ -283,11 +367,13 @@ async def scan_dns(domain: str) -> DNSScanResult:
         dmarc_record, dmarc_finding = _check_dmarc(domain)
         caa_record, caa_finding = _check_caa(domain)
         dnssec_finding = _check_dnssec(domain)
+        takeover_findings = _check_subdomain_takeovers(subdomains or [])
         return (
             a_record, a_finding, mx_record, mx_finding,
             ns_record, ns_finding, txt_record,
             spf_finding, dmarc_record, dmarc_finding,
             caa_record, caa_finding, dnssec_finding,
+            takeover_findings,
         )
 
     (
@@ -295,10 +381,16 @@ async def scan_dns(domain: str) -> DNSScanResult:
         ns_record, ns_finding, txt_record,
         spf_finding, dmarc_record, dmarc_finding,
         caa_record, caa_finding, dnssec_finding,
+        takeover_findings,
     ) = await loop.run_in_executor(None, _run_all)
 
     records = [r for r in [a_record, mx_record, ns_record, txt_record, dmarc_record, caa_record] if r]
     findings = [a_finding, mx_finding, ns_finding, spf_finding, dmarc_finding, caa_finding, dnssec_finding]
+    findings.extend(takeover_findings)
+
+    critical_triggers: list[str] = []
+    if any(f.check.startswith("Potential subdomain takeover") for f in takeover_findings):
+        critical_triggers.append("subdomain_takeover")
 
     risk_score, level = _score(findings)
 
@@ -309,7 +401,7 @@ async def scan_dns(domain: str) -> DNSScanResult:
         findings=findings,
         risk_score=risk_score,
         risk_level=level,
-        critical_triggers=[],
+        critical_triggers=critical_triggers,
         summary={
             "checks_run": len(findings),
             "fail": sum(1 for f in findings if f.status == "fail"),
