@@ -66,6 +66,7 @@ def _top_findings(
                 "title": f"Missing {f.header}",
                 "description": f.description,
                 "remediation": f.remediation,
+                "evidence": f"HTTP response did not include the {f.header} header.",
             })
     for f in headers.information_leaks:
         if f.severity in ("high", "medium"):
@@ -75,26 +76,51 @@ def _top_findings(
                 "title": f"Information leak: {f.header}",
                 "description": f.description,
                 "remediation": f.remediation,
+                "evidence": f"{f.header}: {f.value}",
             })
 
+    txt_records = next((r.values for r in dns.records if r.record_type == "TXT"), [])
     for f in dns.findings:
         if f.status in ("fail", "warn") and f.severity in ("high", "medium"):
+            if "SPF" in f.check and txt_records:
+                dns_evidence = f"TXT records found:\n" + "\n".join(f"  {v}" for v in txt_records[:3])
+            elif "SPF" in f.check:
+                dns_evidence = "No TXT records found for this domain."
+            elif "DMARC" in f.check:
+                dmarc = next((r for r in dns.records if r.record_type == "TXT" and any("dmarc" in v.lower() for v in r.values)), None)
+                dns_evidence = f"_dmarc lookup returned: {dmarc.values[0]}" if dmarc else "No DMARC record found at _dmarc." + headers.domain
+            else:
+                dns_evidence = f"DNS check '{f.check}' status: {f.status}"
             candidates.append({
                 "scanner": "dns",
                 "severity": f.severity,
                 "title": f.check,
                 "description": f.description,
                 "remediation": f.remediation,
+                "evidence": dns_evidence,
             })
 
+    cert = ssl.certificate
+    tls_supported = [v.version for v in ssl.tls_versions if v.supported]
     for f in ssl.findings:
         if f.status in ("fail", "warn") and f.severity in ("high", "medium"):
+            if cert and ("expir" in f.check.lower() or "certif" in f.check.lower() or "self" in f.check.lower()):
+                ssl_evidence = (
+                    f"Subject: {cert.subject}\n"
+                    f"Issuer: {cert.issuer}\n"
+                    f"Expires: {cert.not_after} ({cert.days_until_expiry} days)"
+                )
+            elif tls_supported:
+                ssl_evidence = f"Supported TLS versions: {', '.join(tls_supported)}"
+            else:
+                ssl_evidence = f"SSL check '{f.check}' status: {f.status}"
             candidates.append({
                 "scanner": "ssl",
                 "severity": f.severity,
                 "title": f.check,
                 "description": f.description,
                 "remediation": f.remediation,
+                "evidence": ssl_evidence,
             })
 
     for f in exposure.findings:
@@ -105,6 +131,7 @@ def _top_findings(
                 "title": f.label,
                 "description": f.description,
                 "remediation": f.remediation,
+                "evidence": f"GET /{f.path.lstrip('/')} → HTTP {f.status_code} (publicly accessible)",
             })
 
     if secrets:
@@ -122,6 +149,7 @@ def _top_findings(
                         "Remove the credential from the codebase immediately and rotate it "
                         "with the issuing service. Never commit secrets to client-facing code."
                     ),
+                    "evidence": f"URL: {f.source_url}\nLocation: {f.location}\nPreview: {f.match_preview}",
                 })
 
     candidates.sort(key=lambda c: severity_rank.get(c["severity"], 0), reverse=True)
