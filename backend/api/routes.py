@@ -17,6 +17,7 @@ from services.scan_orchestrator import run_full_scan
 from reports.html_report import generate_html, generate_pdf
 from db.session import get_db
 from db.models import ScanJob
+from auth.deps import get_optional_user_id, require_user_id
 
 router = APIRouter(prefix="/api/v1", tags=["scan"])
 
@@ -73,6 +74,7 @@ async def scan_fingerprint_tech(request: ScanRequest) -> FingerprintScanResult:
 async def scan_full(
     request: ScanRequest,
     db: AsyncSession | None = Depends(get_db),
+    user_id: str | None = Depends(get_optional_user_id),
 ) -> FullScanResult:
     try:
         result = await run_full_scan(request.domain)
@@ -86,6 +88,7 @@ async def scan_full(
             overall_risk_score=result.overall_risk_score,
             overall_risk_level=result.overall_risk_level,
             result=result.model_dump(),
+            user_id=user_id,
         )
         db.add(job)
         await db.commit()
@@ -104,11 +107,17 @@ async def list_scans(
     domain: str | None = Query(default=None, description="Filter by domain"),
     limit: int = Query(default=20, le=100),
     db: AsyncSession | None = Depends(get_db),
+    user_id: str = Depends(require_user_id),
 ) -> list[ScanHistoryItem]:
     if db is None:
         raise HTTPException(status_code=503, detail="Database not configured")
 
-    stmt = select(ScanJob).order_by(desc(ScanJob.created_at)).limit(limit)
+    stmt = (
+        select(ScanJob)
+        .where(ScanJob.user_id == user_id)
+        .order_by(desc(ScanJob.created_at))
+        .limit(limit)
+    )
     if domain:
         stmt = stmt.where(ScanJob.domain == domain.lower())
 
@@ -131,6 +140,7 @@ async def list_scans(
 async def get_scan(
     scan_id: str,
     db: AsyncSession | None = Depends(get_db),
+    user_id: str | None = Depends(get_optional_user_id),
 ) -> FullScanResult:
     if db is None:
         raise HTTPException(status_code=503, detail="Database not configured")
@@ -143,6 +153,10 @@ async def get_scan(
     row = await db.get(ScanJob, job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Scan not found")
+
+    # Scans with a user_id are private — only the owner can access them
+    if row.user_id and row.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     result = FullScanResult.model_validate(row.result)
     result.scan_id = str(row.id)
