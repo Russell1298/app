@@ -3,7 +3,8 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
+from datetime import datetime, timezone
 from models.scan import (
     ScanRequest, HeaderScanResult, DNSScanResult, SSLScanResult,
     ExposureScanResult, FingerprintScanResult, FullScanResult, ScanHistoryItem,
@@ -70,12 +71,34 @@ async def scan_fingerprint_tech(request: ScanRequest) -> FingerprintScanResult:
 # Full scan — runs all scanners concurrently and persists the result
 # ---------------------------------------------------------------------------
 
+FREE_SCAN_LIMIT = 5
+
+
+def _start_of_month() -> datetime:
+    now = datetime.now(timezone.utc)
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
 @router.post("/scan/full", response_model=FullScanResult)
 async def scan_full(
     request: ScanRequest,
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
 ) -> FullScanResult:
+    # Enforce monthly limit for logged-in free users (anonymous users are unlimited)
+    if user_id and db is not None:
+        count = await db.scalar(
+            select(func.count()).where(
+                ScanJob.user_id == user_id,
+                ScanJob.created_at >= _start_of_month(),
+            )
+        )
+        if (count or 0) >= FREE_SCAN_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Monthly scan limit reached ({FREE_SCAN_LIMIT}/{FREE_SCAN_LIMIT}). Upgrade to Pro for unlimited scans.",
+            )
+
     try:
         result = await run_full_scan(request.domain)
     except Exception as e:
@@ -89,6 +112,7 @@ async def scan_full(
             overall_risk_level=result.overall_risk_level,
             result=result.model_dump(),
             user_id=user_id,
+            paid=False,
         )
         db.add(job)
         await db.commit()
@@ -160,6 +184,7 @@ async def get_scan(
 
     result = FullScanResult.model_validate(row.result)
     result.scan_id = str(row.id)
+    result.paid = row.paid
     return result
 
 
@@ -212,6 +237,31 @@ async def download_pdf_report(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Usage / account
+# ---------------------------------------------------------------------------
+
+@router.get("/me/usage")
+async def get_usage(
+    user_id: str = Depends(require_user_id),
+    db: AsyncSession | None = Depends(get_db),
+) -> dict:
+    if db is None:
+        return {"scans_used": 0, "scans_limit": FREE_SCAN_LIMIT, "scans_remaining": FREE_SCAN_LIMIT}
+    count = await db.scalar(
+        select(func.count()).where(
+            ScanJob.user_id == user_id,
+            ScanJob.created_at >= _start_of_month(),
+        )
+    )
+    used = int(count or 0)
+    return {
+        "scans_used": used,
+        "scans_limit": FREE_SCAN_LIMIT,
+        "scans_remaining": max(0, FREE_SCAN_LIMIT - used),
+    }
 
 
 # ---------------------------------------------------------------------------

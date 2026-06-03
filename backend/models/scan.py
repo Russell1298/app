@@ -203,6 +203,7 @@ class FullScanResult(BaseModel):
     overall_risk_score: int
     overall_risk_level: Literal["low", "medium", "high", "critical"]
     top_findings: list[dict]
+    paid: bool = False
 
 
 class ScanHistoryItem(BaseModel):

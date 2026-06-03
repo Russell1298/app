@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, DateTime, Text, Index
+from sqlalchemy import String, Integer, DateTime, Text, Index, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from db.session import Base
@@ -25,3 +25,4 @@ class ScanJob(Base):
     result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
