@@ -1,10 +1,10 @@
 import uuid
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func
-from datetime import datetime, timezone
+from sqlalchemy import select, desc, func, cast, Date
+from datetime import datetime, timezone, date
 from models.scan import (
     ScanRequest, HeaderScanResult, DNSScanResult, SSLScanResult,
     ExposureScanResult, FingerprintScanResult, FullScanResult, ScanHistoryItem,
@@ -72,6 +72,7 @@ async def scan_fingerprint_tech(request: ScanRequest) -> FingerprintScanResult:
 # ---------------------------------------------------------------------------
 
 FREE_SCAN_LIMIT = 5
+ANON_DAILY_LIMIT = 1
 
 
 def _start_of_month() -> datetime:
@@ -79,25 +80,55 @@ def _start_of_month() -> datetime:
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def _start_of_today() -> datetime:
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _get_client_ip(http_request: Request) -> str:
+    forwarded_for = http_request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return http_request.client.host if http_request.client else "unknown"
+
+
 @router.post("/scan/full", response_model=FullScanResult)
 async def scan_full(
     request: ScanRequest,
+    http_request: Request,
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
 ) -> FullScanResult:
-    # Enforce monthly limit for logged-in free users (anonymous users are unlimited)
-    if user_id and db is not None:
-        count = await db.scalar(
-            select(func.count()).where(
-                ScanJob.user_id == user_id,
-                ScanJob.created_at >= _start_of_month(),
+    client_ip = _get_client_ip(http_request)
+
+    if db is not None:
+        if user_id:
+            # Logged-in free users: 5 scans per month
+            count = await db.scalar(
+                select(func.count()).where(
+                    ScanJob.user_id == user_id,
+                    ScanJob.created_at >= _start_of_month(),
+                )
             )
-        )
-        if (count or 0) >= FREE_SCAN_LIMIT:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Monthly scan limit reached ({FREE_SCAN_LIMIT}/{FREE_SCAN_LIMIT}). Upgrade to Pro for unlimited scans.",
+            if (count or 0) >= FREE_SCAN_LIMIT:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Monthly scan limit reached ({FREE_SCAN_LIMIT}/{FREE_SCAN_LIMIT}). Upgrade to Pro for unlimited scans.",
+                )
+        else:
+            # Anonymous users: 1 scan per day per IP
+            count = await db.scalar(
+                select(func.count()).where(
+                    ScanJob.user_id.is_(None),
+                    ScanJob.ip_address == client_ip,
+                    ScanJob.created_at >= _start_of_today(),
+                )
             )
+            if (count or 0) >= ANON_DAILY_LIMIT:
+                raise HTTPException(
+                    status_code=402,
+                    detail="Daily scan limit reached. Create a free account for 5 scans per month, or unlock a full report for $7.99.",
+                )
 
     try:
         result = await run_full_scan(request.domain)
@@ -113,6 +144,7 @@ async def scan_full(
             result=result.model_dump(),
             user_id=user_id,
             paid=False,
+            ip_address=client_ip,
         )
         db.add(job)
         await db.commit()

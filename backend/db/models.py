@@ -26,3 +26,4 @@ class ScanJob(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
