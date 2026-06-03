@@ -23,8 +23,11 @@ REQUIRED_HEADERS: list[dict] = [
             "to cross-site scripting (XSS) and data-injection attacks."
         ),
         "remediation": (
-            "Add a Content-Security-Policy header. Start with \"default-src 'self'\" "
-            "and broaden only what your app needs."
+            "Add a Content-Security-Policy header so the browser only loads scripts "
+            "and content you trust. On WordPress, a security plugin like Wordfence can "
+            "set it for you. On your own Nginx or Apache server, add the header starting "
+            "with \"default-src 'self'\" and allow more only where your site needs it. "
+            "Tip: turn it on in report-only mode first so you don't break anything."
         ),
     },
     {
@@ -35,7 +38,12 @@ REQUIRED_HEADERS: list[dict] = [
             "HSTS is missing. Without it, browsers may connect over plain HTTP "
             "enabling protocol-downgrade and man-in-the-middle attacks."
         ),
-        "remediation": "Add Strict-Transport-Security: max-age=31536000; includeSubDomains.",
+        "remediation": (
+            "Turn on HSTS so browsers always use HTTPS for your site. Add this response "
+            "header: Strict-Transport-Security: max-age=31536000; includeSubDomains. "
+            "Most hosts and CDNs (like Cloudflare) have a one-click HSTS toggle. Only "
+            "enable it once HTTPS works everywhere on your site."
+        ),
     },
     {
         "header": "x-frame-options",
@@ -45,7 +53,12 @@ REQUIRED_HEADERS: list[dict] = [
             "X-Frame-Options is missing. Without it, the page can be embedded in "
             "an iframe on an attacker-controlled site, enabling clickjacking attacks."
         ),
-        "remediation": "Add X-Frame-Options: DENY (or SAMEORIGIN). Alternatively, set frame-ancestors in your CSP.",
+        "remediation": (
+            "Stop other sites from loading your pages inside a hidden frame (a trick "
+            "used for clickjacking). Add the header X-Frame-Options: SAMEORIGIN. If you "
+            "use Cloudflare or a security plugin, look for a 'clickjacking' or 'frame "
+            "options' setting."
+        ),
     },
     {
         "header": "x-content-type-options",
@@ -55,7 +68,11 @@ REQUIRED_HEADERS: list[dict] = [
             "X-Content-Type-Options is missing. Browsers may sniff the MIME type "
             "of responses and execute them as a different type than intended."
         ),
-        "remediation": "Add X-Content-Type-Options: nosniff.",
+        "remediation": (
+            "Add the header X-Content-Type-Options: nosniff. This stops browsers from "
+            "guessing file types, which can turn a harmless upload into a running script. "
+            "It's a single line in your server or CDN config and safe to add."
+        ),
     },
     {
         "header": "referrer-policy",
@@ -65,7 +82,11 @@ REQUIRED_HEADERS: list[dict] = [
             "Referrer-Policy is missing. Browsers may send full URLs in the Referer "
             "header to third-party sites, leaking internal paths or session tokens."
         ),
-        "remediation": "Add Referrer-Policy: strict-origin-when-cross-origin.",
+        "remediation": (
+            "Add the header Referrer-Policy: strict-origin-when-cross-origin. This keeps "
+            "your full page URLs from leaking to other websites visitors click through to. "
+            "Safe to add for almost every site."
+        ),
     },
     {
         "header": "permissions-policy",
@@ -75,7 +96,11 @@ REQUIRED_HEADERS: list[dict] = [
             "Permissions-Policy is missing. Embedded iframes or injected scripts "
             "can access browser features your site does not need."
         ),
-        "remediation": "Add Permissions-Policy: camera=(), microphone=(), geolocation=()",
+        "remediation": (
+            "Add the header Permissions-Policy: camera=(), microphone=(), geolocation=() "
+            "to block access to the camera, mic, and location unless your site actually "
+            "uses them. Adjust the list if you do need one of these."
+        ),
     },
 ]
 
@@ -88,7 +113,11 @@ LEAK_HEADERS: list[dict] = [
             "The Server header exposes web server software and version. "
             "Attackers use this to look up known vulnerabilities for that exact version."
         ),
-        "remediation": "nginx: server_tokens off; Apache: ServerTokens Prod; ServerSignature Off",
+        "remediation": (
+            "Your server is announcing its exact software and version, which tells "
+            "attackers which known bugs to try. Hide it: on Nginx add 'server_tokens off;', "
+            "on Apache set 'ServerTokens Prod' and 'ServerSignature Off', then reload the server."
+        ),
     },
     {
         "header": "x-powered-by",
@@ -98,21 +127,31 @@ LEAK_HEADERS: list[dict] = [
             "X-Powered-By exposes the application framework and version. "
             "This helps attackers target known CVEs."
         ),
-        "remediation": "Remove this header. Express: app.disable('x-powered-by'); PHP: expose_php = Off",
+        "remediation": (
+            "Your site is broadcasting which framework it runs (the X-Powered-By header), "
+            "making it easier to target. Remove it: in Express use app.disable('x-powered-by'), "
+            "in PHP set expose_php = Off in php.ini. Cloudflare can also strip this header for you."
+        ),
     },
     {
         "header": "x-aspnet-version",
         "severity": "medium",
         "versioned_only": False,
         "description": "Reveals the exact ASP.NET runtime version in use.",
-        "remediation": "Set <httpRuntime enableVersionHeader='false' /> in web.config",
+        "remediation": (
+            "Your site reveals the exact ASP.NET version. Hide it by adding "
+            "<httpRuntime enableVersionHeader='false' /> to your web.config, then restart the app."
+        ),
     },
     {
         "header": "x-aspnetmvc-version",
         "severity": "low",
         "versioned_only": False,
         "description": "Reveals the ASP.NET MVC version.",
-        "remediation": "Remove via MvcHandler.DisableMvcResponseHeader = true in Global.asax",
+        "remediation": (
+            "Your site reveals the ASP.NET MVC version. Remove it by adding "
+            "MvcHandler.DisableMvcResponseHeader = true; in Global.asax (Application_Start)."
+        ),
     },
 ]
 
@@ -134,7 +173,10 @@ def _check_hsts_value(value: str) -> HeaderFinding | None:
             severity="high",
             value=value,
             description="HSTS header is present but missing max-age directive.",
-            remediation="Set max-age to at least 15552000 (180 days).",
+            remediation=(
+                "Your HSTS header is missing the max-age part, so it does nothing. Update "
+                "it to: Strict-Transport-Security: max-age=31536000; includeSubDomains."
+            ),
             penalty=PENALTY["high"],
         )
     try:
@@ -146,7 +188,10 @@ def _check_hsts_value(value: str) -> HeaderFinding | None:
                 severity="medium",
                 value=value,
                 description=f"HSTS max-age is only {max_age} seconds (less than 180 days).",
-                remediation="Increase max-age to at least 15552000 (180 days).",
+                remediation=(
+                    "Your HSTS max-age is too short. Set it to at least 31536000 (one "
+                    "year): Strict-Transport-Security: max-age=31536000; includeSubDomains."
+                ),
                 penalty=PENALTY["medium"],
             )
     except (IndexError, ValueError):
@@ -240,8 +285,11 @@ async def scan_headers(domain: str) -> HeaderScanResult:
                         "Violations are monitored but not blocked — XSS attacks are still possible."
                     ),
                     remediation=(
-                        "Switch Content-Security-Policy-Report-Only to Content-Security-Policy "
-                        "once your policy is validated."
+                        "Your Content-Security-Policy is in 'report-only' mode, so it watches "
+                        "for problems but doesn't actually block anything. Once you've checked "
+                        "the reports and nothing legitimate is flagged, rename the header from "
+                        "Content-Security-Policy-Report-Only to Content-Security-Policy to turn "
+                        "on real protection."
                     ),
                     penalty=p,
                 ))

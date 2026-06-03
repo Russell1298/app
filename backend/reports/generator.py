@@ -146,8 +146,10 @@ def _top_findings(
                         "This credential is publicly visible to anyone who visits the site."
                     ),
                     "remediation": (
-                        "Remove the credential from the codebase immediately and rotate it "
-                        "with the issuing service. Never commit secrets to client-facing code."
+                        "Remove this credential from your website's code right away, then "
+                        "change it (rotate it) with the service it belongs to — assume it's "
+                        "already been seen. Keep secrets in server-side environment variables, "
+                        "never in code that ships to the browser."
                     ),
                     "evidence": f"URL: {f.source_url}\nLocation: {f.location}\nPreview: {f.match_preview}",
                 })

@@ -98,7 +98,7 @@ def _findings_from_cert(
         findings.append(SSLFinding(
             check="Self-signed certificate", status="fail", severity="high",
             description="The certificate is self-signed and will not be trusted by browsers.",
-            remediation="Replace with a certificate from a trusted CA (e.g. Let's Encrypt).",
+            remediation="Your SSL certificate is self-signed, so browsers show a scary warning to every visitor. Replace it with a free, trusted certificate from Let's Encrypt — most hosts have a one-click option, or use Certbot if you manage your own server.",
             penalty=PENALTY["high"],
         ))
         triggers.append("cert_self_signed")
@@ -113,7 +113,7 @@ def _findings_from_cert(
         findings.append(SSLFinding(
             check="Certificate verification", status="fail", severity="high",
             description=f"Certificate failed verification: {verify_error}",
-            remediation="Check that the certificate chain is complete and matches the hostname.",
+            remediation="Your certificate didn't pass validation — usually the certificate chain is incomplete or doesn't match your domain name. Reinstall the full chain (your cert plus the CA's intermediate certs) from your certificate provider.",
             penalty=PENALTY["high"],
         ))
 
@@ -121,7 +121,7 @@ def _findings_from_cert(
         findings.append(SSLFinding(
             check="Certificate expiry", status="fail", severity="high",
             description=f"Certificate expired {abs(cert.days_until_expiry)} day(s) ago.",
-            remediation="Renew the certificate immediately.",
+            remediation="Your SSL certificate has expired, so visitors see a security warning. Renew it now. If you use Let's Encrypt, run your renewal (or 'certbot renew') and set up auto-renewal so this doesn't happen again.",
             penalty=PENALTY["high"],
         ))
         triggers.append("cert_expired")
@@ -129,7 +129,7 @@ def _findings_from_cert(
         findings.append(SSLFinding(
             check="Certificate expiry", status="fail", severity="high",
             description=f"Certificate expires in {cert.days_until_expiry} day(s) — renewal is urgent.",
-            remediation="Renew immediately to avoid browser warnings.",
+            remediation="Your SSL certificate expires within a week. Renew it now to avoid security warnings. Let's Encrypt users can run 'certbot renew'; most hosting panels have a renew button. Turn on auto-renewal if you can.",
             penalty=PENALTY["high"],
         ))
         triggers.append("cert_expired")
@@ -137,7 +137,7 @@ def _findings_from_cert(
         findings.append(SSLFinding(
             check="Certificate expiry", status="warn", severity="medium",
             description=f"Certificate expires in {cert.days_until_expiry} day(s).",
-            remediation="Renew within the next week to avoid disruption.",
+            remediation="Your SSL certificate expires soon. Renew it in the next few days. If you're on Let's Encrypt, make sure auto-renewal is turned on so it renews by itself going forward.",
             penalty=PENALTY["medium"],
         ))
     else:
@@ -152,7 +152,7 @@ def _findings_from_cert(
         findings.append(SSLFinding(
             check="Hostname coverage", status="fail", severity="high",
             description=f"Certificate does not cover '{domain}'. SANs: {', '.join(cert.sans[:5])}.",
-            remediation="Reissue the certificate including this domain as a SAN.",
+            remediation=f"Your SSL certificate doesn't list this exact domain name, so browsers will reject it. Reissue the certificate and include {domain} in it (as a SAN). If you use Let's Encrypt, just add the domain when you request the cert.",
             penalty=PENALTY["high"],
         ))
         triggers.append("cert_hostname_mismatch")
@@ -174,7 +174,7 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
         findings.append(SSLFinding(
             check="TLS 1.0", status="fail", severity="high",
             description="TLS 1.0 is supported. Deprecated protocol with known vulnerabilities (POODLE, BEAST).",
-            remediation="nginx: ssl_protocols TLSv1.2 TLSv1.3; Apache: SSLProtocol -all +TLSv1.2 +TLSv1.3",
+            remediation="Your server still allows TLS 1.0, an outdated protocol with known weaknesses. Turn it off and allow only modern versions. On Nginx: ssl_protocols TLSv1.2 TLSv1.3; On Apache: SSLProtocol -all +TLSv1.2 +TLSv1.3. Then reload the server.",
             penalty=PENALTY["high"],
         ))
     elif version_map.get("TLS 1.0") is False:
@@ -185,7 +185,7 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
         findings.append(SSLFinding(
             check="TLS 1.1", status="fail", severity="medium",
             description="TLS 1.1 is supported. Deprecated protocol lacking modern cipher support.",
-            remediation="Disable TLS 1.1 alongside TLS 1.0.",
+            remediation="Turn off TLS 1.1 along with TLS 1.0 — both are outdated. Set your server to allow only TLS 1.2 and 1.3 (Nginx: ssl_protocols TLSv1.2 TLSv1.3;), then reload.",
             penalty=PENALTY["medium"],
         ))
     elif version_map.get("TLS 1.1") is False:
@@ -211,8 +211,10 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
                 "Disable them in your web server config."
             ),
             remediation=(
-                "TLS 1.0/1.1 are deprecated and vulnerable to downgrade attacks. "
-                "Disable them in your web server config."
+                "Your server accepts old TLS versions (1.0/1.1) that attackers can exploit "
+                "to weaken the connection. Allow only TLS 1.2 and 1.3. On Nginx: "
+                "ssl_protocols TLSv1.2 TLSv1.3; On Apache: SSLProtocol -all +TLSv1.2 +TLSv1.3. "
+                "If you use Cloudflare, set the minimum TLS version to 1.2 in the SSL/TLS settings."
             ),
             penalty=10,
         ))
@@ -224,7 +226,7 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
         findings.append(SSLFinding(
             check="Modern TLS", status="fail", severity="high",
             description="Neither TLS 1.2 nor TLS 1.3 is supported. Most clients require TLS 1.2 minimum.",
-            remediation="Enable TLS 1.2 and TLS 1.3 in your server configuration.",
+            remediation="Your server doesn't support TLS 1.2 or 1.3, which nearly all browsers now require. Update your server software and enable both. On Nginx: ssl_protocols TLSv1.2 TLSv1.3;",
             penalty=PENALTY["high"],
         ))
     else:
@@ -235,7 +237,7 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
             findings.append(SSLFinding(
                 check="TLS 1.2", status="fail", severity="high",
                 description="TLS 1.2 is not supported. Many clients require TLS 1.2 as a minimum.",
-                remediation="Enable TLS 1.2 in your server configuration.",
+                remediation="Enable TLS 1.2 — many browsers and apps need it as a minimum. On Nginx add it to ssl_protocols TLSv1.2 TLSv1.3; and reload. You may need to update OpenSSL if it's an old server.",
                 penalty=PENALTY["high"],
             ))
         if tls13 is True:
@@ -246,7 +248,7 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
             findings.append(SSLFinding(
                 check="TLS 1.3", status="warn", severity="low",
                 description="TLS 1.3 is not supported. TLS 1.3 is faster and more secure than TLS 1.2.",
-                remediation="Enable TLS 1.3 — most modern servers support it with a recent OpenSSL version.",
+                remediation="Your server supports TLS 1.2 but not the newer, faster TLS 1.3. Turn it on — most modern servers support it with an up-to-date OpenSSL. On Nginx: ssl_protocols TLSv1.2 TLSv1.3;",
                 penalty=PENALTY["low"],
             ))
 
@@ -261,7 +263,7 @@ def _finding_from_cipher(cipher: tuple | None) -> SSLFinding | None:
         return SSLFinding(
             check="Negotiated cipher suite", status="fail", severity="high",
             description=f"Weak cipher suite negotiated: {name}.",
-            remediation="Prefer AES-GCM and ChaCha20-Poly1305. Remove RC4, 3DES, and EXPORT ciphers.",
+            remediation="Your server negotiated a weak, outdated encryption cipher. Update your server to prefer modern ciphers (AES-GCM and ChaCha20-Poly1305) and remove old ones like RC4, 3DES, and EXPORT. Mozilla's SSL Config Generator gives you a ready-to-paste config for your exact server.",
             penalty=PENALTY["high"],
         )
     return SSLFinding(check="Negotiated cipher suite", status="pass", severity=None,
@@ -300,7 +302,7 @@ async def scan_ssl(domain: str, port: int = PORT) -> SSLScanResult:
         findings.append(SSLFinding(
             check="TLS reachability", status="fail", severity="high",
             description=f"Could not establish a TLS connection to {domain}:{port}. Error: {verify_error}",
-            remediation="Ensure HTTPS is enabled and the server is reachable on port 443.",
+            remediation="We couldn't make a secure HTTPS connection on port 443. Make sure HTTPS is set up and your server is reachable. If your site only works on http://, install an SSL certificate (Let's Encrypt is free) and open port 443 in your firewall.",
             penalty=PENALTY["high"],
         ))
     else:

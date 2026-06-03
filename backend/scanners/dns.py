@@ -76,7 +76,11 @@ def _check_a(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
             status="fail",
             severity="high",
             description="Domain does not resolve to any IP address.",
-            remediation="Add an A or AAAA record in your DNS zone pointing to your server.",
+            remediation=(
+                "Your domain doesn't point anywhere. Log in to your DNS provider (where "
+                "you bought the domain, or Cloudflare) and add an A record pointing to your "
+                "server's IP address. If you use IPv6, add an AAAA record too."
+            ),
             penalty=PENALTY["high"],
         ),
     )
@@ -95,7 +99,7 @@ def _check_mx(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
         None,
         DNSFinding(check="MX records", status="info", severity=None,
                    description="No MX records found.",
-                   remediation="Add MX records if the domain handles email.", penalty=0),
+                   remediation="If this domain sends or receives email, add MX records pointing to your email provider (Google Workspace, Microsoft 365, etc.). If it's a website-only domain, you can ignore this.", penalty=0),
     )
 
 
@@ -134,7 +138,12 @@ def _check_spf(domain: str) -> DNSFinding:
                 "No SPF record found. Without SPF, anyone can send email claiming to "
                 "be from this domain, enabling phishing and spam attacks."
             ),
-            remediation="Add a TXT record: v=spf1 include:<your-mail-provider> -all",
+            remediation=(
+                "Add an SPF record so other mail servers know which servers are allowed "
+                "to send email as your domain — this blocks scammers from spoofing you. "
+                "In your DNS settings add a TXT record. Your email provider gives you the "
+                "exact value; for example Google Workspace uses: v=spf1 include:_spf.google.com -all"
+            ),
             penalty=PENALTY["high"],
         )
 
@@ -144,7 +153,10 @@ def _check_spf(domain: str) -> DNSFinding:
             status="fail",
             severity="medium",
             description=f"Multiple SPF records found ({len(spf_records)}). RFC 7208 requires exactly one.",
-            remediation="Merge all SPF mechanisms into a single TXT record.",
+            remediation=(
+                "You have more than one SPF record, which makes them all invalid. Combine "
+                "them into a single TXT record that lists every mail service you use, ending in -all."
+            ),
             penalty=PENALTY["medium"],
         )
 
@@ -156,7 +168,7 @@ def _check_spf(domain: str) -> DNSFinding:
             status="fail",
             severity="high",
             description=f"SPF uses '+all' — anyone can spoof your domain: {spf!r}",
-            remediation="Change '+all' to '-all'.",
+            remediation="Your SPF record ends in '+all', which lets anyone send email as your domain — the opposite of what you want. Change '+all' to '-all' in your TXT record.",
             penalty=PENALTY["high"],
         )
     if "?all" in spf:
@@ -165,7 +177,7 @@ def _check_spf(domain: str) -> DNSFinding:
             status="warn",
             severity="medium",
             description=f"SPF uses '?all' (neutral) — no rejection of spoofed mail: {spf!r}",
-            remediation="Change '?all' to '-all'.",
+            remediation="Your SPF record ends in '?all' (neutral), so spoofed mail isn't rejected. Once you've confirmed all your real mail sources are listed, change '?all' to '-all'.",
             penalty=PENALTY["medium"],
         )
     if "~all" in spf:
@@ -174,7 +186,7 @@ def _check_spf(domain: str) -> DNSFinding:
             status="warn",
             severity="low",
             description=f"SPF uses '~all' (softfail) — unauthorised senders flagged but not rejected: {spf!r}",
-            remediation="Change '~all' to '-all' once legitimate mail sources are listed.",
+            remediation="Your SPF record ends in '~all' (softfail), so fake mail is only flagged, not blocked. After confirming your legitimate senders are all listed, tighten it to '-all'.",
             penalty=PENALTY["low"],
         )
 
@@ -200,8 +212,11 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
                     "have no instruction on what to do with failing messages."
                 ),
                 remediation=(
-                    f"Add a TXT record at _dmarc.{domain}: "
-                    f"v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@{domain}"
+                    "Add a DMARC record to tell mail servers what to do with email that "
+                    "fails your SPF checks. In your DNS, add a TXT record named '_dmarc' "
+                    f"with a value like: v=DMARC1; p=quarantine; rua=mailto:you@{domain}. "
+                    "Start with p=quarantine and move to p=reject once you've confirmed "
+                    "your real email still arrives."
                 ),
                 penalty=PENALTY["high"],
             ),
@@ -221,14 +236,14 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
         return (record, DNSFinding(
             check="DMARC", status="warn", severity="medium",
             description=f"DMARC policy is 'none' — failing messages are not quarantined or rejected: {dmarc!r}",
-            remediation="Change p=none to p=quarantine, then p=reject.",
+            remediation="Your DMARC policy is set to p=none, which only monitors and doesn't stop spoofed email. Once you've reviewed your reports, change it to p=quarantine, then later p=reject for full protection.",
             penalty=PENALTY["medium"],
         ))
     if policy == "quarantine":
         return (record, DNSFinding(
             check="DMARC", status="warn", severity="low",
             description=f"DMARC policy is 'quarantine' — failing messages go to spam: {dmarc!r}",
-            remediation="Consider upgrading to p=reject.",
+            remediation="Your DMARC is set to p=quarantine (fake mail goes to spam). For the strongest protection, change it to p=reject once you're confident your legitimate email passes.",
             penalty=PENALTY["low"],
         ))
 
@@ -253,7 +268,7 @@ def _check_caa(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
         DNSFinding(
             check="CAA", status="warn", severity="low",
             description="No CAA records. Any CA can issue certificates for this domain.",
-            remediation='Add: 0 issue "letsencrypt.org"',
+            remediation='Add a CAA record to control which certificate authorities can issue SSL certificates for your domain. In your DNS, add a CAA record like: 0 issue "letsencrypt.org" (use whichever CA you actually use). This stops other CAs from issuing certs for you.',
             penalty=PENALTY["low"],
         ),
     )
@@ -274,7 +289,7 @@ def _check_dnssec(domain: str) -> DNSFinding:
     return DNSFinding(
         check="DNSSEC", status="info", severity=None,
         description="DNSSEC is not configured. Reported for information only — not penalised.",
-        remediation="Consider enabling DNSSEC through your domain registrar.",
+        remediation="DNSSEC adds tamper-proofing to your DNS so visitors can't be silently redirected. Many registrars (and Cloudflare) let you turn it on with one click in the domain's settings. Optional, but a nice extra layer.",
         penalty=0,
     )
 
@@ -334,8 +349,10 @@ def _check_subdomain_takeovers(subdomains: list[str]) -> list[DNSFinding]:
                         "this service and serve malicious content under your subdomain."
                     ),
                     remediation=(
-                        f"Either remove the CNAME record for {sub} or claim the "
-                        f"cloud resource at {target} to prevent takeover."
+                        f"The subdomain {sub} points to {target}, a cloud service that no "
+                        "longer exists, so an attacker could claim it and host content on "
+                        f"your subdomain. Fix it by either deleting the CNAME record for {sub} "
+                        f"in your DNS, or re-claiming the service at {target} if you still need it."
                     ),
                     penalty=30,
                 ))
