@@ -1,10 +1,14 @@
 """Live security news feed aggregator.
 
-Aggregates from CISA KEV, NVD 2.0, and WPScan (if WPSCAN_API_TOKEN is set).
-Results are stored in an in-memory list. The /api/v1/livefeed endpoint reads
-from cache only — upstream is never hit on a user request.
+Aggregates from:
+  - The Hacker News RSS
+  - BleepingComputer RSS
+  - CISA Known Exploited Vulnerabilities (KEV)
+  - WPScan (optional, requires WPSCAN_API_TOKEN)
 
-Refresh runs on startup and every 30 minutes via APScheduler.
+Results are stored in an in-memory list and served by /api/livefeed.
+Upstream sources are never hit on a user request — only during the
+scheduled refresh (startup + every 30 minutes via APScheduler).
 """
 
 import asyncio
@@ -13,7 +17,9 @@ import html
 import logging
 import os
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime as rfc2822_parse
 
 import httpx
 
@@ -25,14 +31,17 @@ _CACHE_POPULATED = False
 _USER_AGENT = "SiteGuard-SecurityScanner/1.0 (contact: hello@siteguard.app)"
 _MAX_AGE_DAYS = 14
 _MAX_ITEMS = 10
-_NVD_KEYWORDS = ["shopify", "wordpress", "woocommerce", "magento", "bigcommerce"]
 
 WPSCAN_TOKEN = os.getenv("WPSCAN_API_TOKEN", "")
-NVD_API_KEY = os.getenv("NVD_API_KEY", "")
+
+_RSS_FEEDS = [
+    ("https://feeds.feedburner.com/TheHackersNews", "The Hacker News"),
+    ("https://www.bleepingcomputer.com/feed/", "BleepingComputer"),
+]
 
 
 # ---------------------------------------------------------------------------
-# Normalisation helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _strip_html(text: str) -> str:
@@ -53,11 +62,44 @@ def _is_recent(dt: datetime) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Source fetchers — each wrapped in its own try/except
+# Source fetchers
 # ---------------------------------------------------------------------------
 
+async def _fetch_rss(client: httpx.AsyncClient, feed_url: str, source_name: str) -> list[dict]:
+    """Fetch and parse an RSS 2.0 feed, returning recent items."""
+    try:
+        resp = await client.get(feed_url, timeout=15)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        items = []
+        for item in root.findall(".//item")[:20]:
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            pub_date = (item.findtext("pubDate") or "").strip()
+            if not title or not link:
+                continue
+            try:
+                dt = rfc2822_parse(pub_date).astimezone(timezone.utc)
+            except Exception:
+                dt = datetime.now(timezone.utc)
+            if not _is_recent(dt):
+                continue
+            item_id = hashlib.md5(link.encode()).hexdigest()[:12]
+            items.append({
+                "id": f"rss-{item_id}",
+                "headline": _normalize(title),
+                "url": link,
+                "published_at": dt.isoformat(),
+            })
+        log.info("%s RSS: %d recent items", source_name, len(items))
+        return items
+    except Exception as exc:
+        log.error("%s RSS fetch failed: %s", source_name, exc)
+        return []
+
+
 async def _fetch_cisa_kev(client: httpx.AsyncClient) -> list[dict]:
-    """Download the full CISA KEV catalogue and return items added in the last 14 days."""
+    """Download the CISA KEV catalogue and return items added in the last 14 days."""
     url = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
     try:
         resp = await client.get(url, timeout=20)
@@ -75,11 +117,11 @@ async def _fetch_cisa_kev(client: httpx.AsyncClient) -> list[dict]:
             vendor = vuln.get("vendorProject", "")
             product = vuln.get("product", "")
             name = vuln.get("vulnerabilityName", "")
-            headline = f"{cve_id}: {name} ({vendor} {product}) is actively exploited."
+            headline = f"{cve_id}: {name} in {vendor} {product} is actively exploited."
             items.append({
                 "id": f"cisa-{cve_id}",
                 "headline": _normalize(headline),
-                "url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+                "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
                 "published_at": dt.isoformat(),
             })
         log.info("CISA KEV: %d recent items", len(items))
@@ -89,57 +131,8 @@ async def _fetch_cisa_kev(client: httpx.AsyncClient) -> list[dict]:
         return []
 
 
-async def _fetch_nvd(client: httpx.AsyncClient) -> list[dict]:
-    """Query NVD 2.0 for recent CVEs matching store-platform keywords."""
-    base_url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-    headers: dict[str, str] = {"User-Agent": _USER_AGENT}
-    if NVD_API_KEY:
-        headers["apiKey"] = NVD_API_KEY
-
-    seen: set[str] = set()
-    items: list[dict] = []
-
-    for keyword in _NVD_KEYWORDS:
-        try:
-            # Stay within the unauthenticated NVD rate limit (5 req / 30 s)
-            await asyncio.sleep(2)
-            resp = await client.get(
-                base_url,
-                params={"keywordSearch": keyword, "resultsPerPage": 5},
-                headers=headers,
-                timeout=25,
-            )
-            resp.raise_for_status()
-            for vuln in resp.json().get("vulnerabilities", []):
-                cve = vuln.get("cve", {})
-                cve_id = cve.get("id", "")
-                if not cve_id or cve_id in seen:
-                    continue
-                seen.add(cve_id)
-                published = cve.get("published", "")
-                try:
-                    dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    continue
-                if not _is_recent(dt):
-                    continue
-                descriptions = cve.get("descriptions", [])
-                desc = next((d["value"] for d in descriptions if d.get("lang") == "en"), cve_id)
-                items.append({
-                    "id": f"nvd-{cve_id}",
-                    "headline": _normalize(f"{cve_id}: {desc}"),
-                    "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
-                    "published_at": dt.isoformat(),
-                })
-        except Exception as exc:
-            log.error("NVD fetch failed for keyword '%s': %s", keyword, exc)
-
-    log.info("NVD: %d recent items", len(items))
-    return items
-
-
 async def _fetch_wpscan(client: httpx.AsyncClient) -> list[dict]:
-    """Fetch WPScan plugin vulnerability feed. Requires WPSCAN_API_TOKEN env var."""
+    """Fetch WPScan plugin vulnerability feed. Skipped if WPSCAN_API_TOKEN is not set."""
     if not WPSCAN_TOKEN:
         return []
     url = "https://wpscan.com/api/v3/vulnerabilities/plugins"
@@ -206,15 +199,17 @@ async def refresh() -> None:
     log.info("livefeed: starting refresh")
 
     async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
+        rss_coros = [_fetch_rss(client, url, name) for url, name in _RSS_FEEDS]
         results = await asyncio.gather(
             _fetch_cisa_kev(client),
-            _fetch_nvd(client),
+            *rss_coros,
             _fetch_wpscan(client),
             return_exceptions=True,
         )
 
+    source_names = ["cisa"] + [name for _, name in _RSS_FEEDS] + ["wpscan"]
     sources: list[list[dict]] = []
-    for label, result in zip(("cisa", "nvd", "wpscan"), results):
+    for label, result in zip(source_names, results):
         if isinstance(result, Exception):
             log.error("livefeed source '%s' raised: %s", label, result)
         elif isinstance(result, list):
