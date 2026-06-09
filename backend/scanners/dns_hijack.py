@@ -12,6 +12,7 @@ All queries are purely passive — read-only DNS lookups only.
 
 import asyncio
 import ipaddress
+import concurrent.futures
 import dns.resolver
 import dns.exception
 from models.scan import DNSHijackFinding, DNSHijackScanResult, utc_now_iso
@@ -67,10 +68,21 @@ def _is_bare_ip(value: str) -> bool:
 
 def _check_resolver_consistency(domain: str) -> tuple[dict[str, list[str]], DNSHijackFinding]:
     resolver_results: dict[str, list[str]] = {}
-    for name, ip in _RESOLVERS.items():
+
+    def _query_one(item: tuple[str, str]) -> tuple[str, list[str]]:
+        name, ip = item
         ips, _ = _query_a_with_ttl(domain, _make_resolver(ip))
-        if ips:
-            resolver_results[name] = sorted(ips)
+        return name, sorted(ips)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(_query_one, item): item[0] for item in _RESOLVERS.items()}
+        for future in concurrent.futures.as_completed(futures, timeout=14):
+            try:
+                name, ips = future.result()
+                if ips:
+                    resolver_results[name] = ips
+            except Exception:
+                pass
 
     if len(resolver_results) < 2:
         return resolver_results, DNSHijackFinding(
@@ -260,13 +272,55 @@ def _check_dnssec(domain: str) -> DNSHijackFinding:
     )
 
 
+_INFO_FALLBACK = DNSHijackFinding(
+    check="unavailable",
+    status="info",
+    severity=None,
+    description="This check could not be completed.",
+    remediation=None,
+    penalty=0,
+)
+
+
 def _run_all_checks(
     domain: str,
 ) -> tuple[dict[str, list[str]], DNSHijackFinding, DNSHijackFinding, DNSHijackFinding, DNSHijackFinding]:
-    resolver_results, consistency_finding = _check_resolver_consistency(domain)
-    fast_flux_finding = _check_fast_flux(domain)
-    mx_finding = _check_mx_anomaly(domain)
-    dnssec_finding = _check_dnssec(domain)
+    """Run all four DNS-hijack checks concurrently in a thread pool."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        f_c  = pool.submit(_check_resolver_consistency, domain)
+        f_ff = pool.submit(_check_fast_flux, domain)
+        f_mx = pool.submit(_check_mx_anomaly, domain)
+        f_ds = pool.submit(_check_dnssec, domain)
+
+        try:
+            resolver_results, consistency_finding = f_c.result(timeout=20)
+        except Exception:
+            resolver_results, consistency_finding = {}, DNSHijackFinding(
+                check="Cross-resolver consistency", status="info", severity=None,
+                description="Resolver comparison timed out.", remediation=None, penalty=0,
+            )
+        try:
+            fast_flux_finding = f_ff.result(timeout=15)
+        except Exception:
+            fast_flux_finding = DNSHijackFinding(
+                check="Fast-flux DNS", status="info", severity=None,
+                description="Fast-flux check timed out.", remediation=None, penalty=0,
+            )
+        try:
+            mx_finding = f_mx.result(timeout=15)
+        except Exception:
+            mx_finding = DNSHijackFinding(
+                check="MX record anomaly", status="info", severity=None,
+                description="MX anomaly check timed out.", remediation=None, penalty=0,
+            )
+        try:
+            dnssec_finding = f_ds.result(timeout=15)
+        except Exception:
+            dnssec_finding = DNSHijackFinding(
+                check="DNSSEC", status="info", severity=None,
+                description="DNSSEC check timed out.", remediation=None, penalty=0,
+            )
+
     return resolver_results, consistency_finding, fast_flux_finding, mx_finding, dnssec_finding
 
 

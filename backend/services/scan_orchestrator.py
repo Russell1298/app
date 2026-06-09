@@ -1,13 +1,14 @@
 """
 Scan orchestrator.
 
-Runs all scanners concurrently and collects their results.
-Each scanner is fully independent so asyncio.gather gives a real
-speed-up — a full scan takes roughly as long as the slowest scanner
-rather than the sum of all seven.
+Runs all scanners concurrently via asyncio.gather.  The two newest scanners
+(checkout_scripts, dns_hijack) are treated as optional extras: if either
+throws for any reason, the core scan still completes and the failed scanner
+returns an empty/safe result instead of taking down the whole scan.
 """
 
 import asyncio
+import logging
 from scanners.headers import scan_headers
 from scanners.dns import scan_dns
 from scanners.sslscan import scan_ssl
@@ -18,7 +19,55 @@ from scanners.secrets import scan_secrets
 from scanners.checkout_scripts import scan_checkout_scripts
 from scanners.dns_hijack import scan_dns_hijack
 from reports.generator import build_full_report
-from models.scan import FullScanResult
+from models.scan import (
+    FullScanResult,
+    CheckoutScriptScanResult,
+    DNSHijackScanResult,
+    utc_now_iso,
+)
+
+log = logging.getLogger(__name__)
+
+
+def _checkout_fallback(domain: str) -> CheckoutScriptScanResult:
+    return CheckoutScriptScanResult(
+        domain=domain,
+        scan_timestamp=utc_now_iso(),
+        pages_scanned=[],
+        scripts=[],
+        findings=[],
+        risk_score=0,
+        risk_level="low",
+        summary={"pages_scanned": 0, "skipped": True},
+    )
+
+
+def _dns_hijack_fallback(domain: str) -> DNSHijackScanResult:
+    return DNSHijackScanResult(
+        domain=domain,
+        scan_timestamp=utc_now_iso(),
+        resolver_results={},
+        findings=[],
+        risk_score=0,
+        risk_level="low",
+        summary={"checks_run": 0, "skipped": True},
+    )
+
+
+async def _safe_checkout(domain: str) -> CheckoutScriptScanResult:
+    try:
+        return await scan_checkout_scripts(domain)
+    except Exception as exc:
+        log.warning("checkout_scripts failed for %s: %s", domain, exc)
+        return _checkout_fallback(domain)
+
+
+async def _safe_dns_hijack(domain: str) -> DNSHijackScanResult:
+    try:
+        return await scan_dns_hijack(domain)
+    except Exception as exc:
+        log.warning("dns_hijack failed for %s: %s", domain, exc)
+        return _dns_hijack_fallback(domain)
 
 
 async def run_full_scan(domain: str) -> FullScanResult:
@@ -40,9 +89,8 @@ async def run_full_scan(domain: str) -> FullScanResult:
         scan_fingerprint(domain),
         scan_subdomains(domain),
         scan_secrets(domain),
-        scan_checkout_scripts(domain),
-        scan_dns_hijack(domain),
-        return_exceptions=False,
+        _safe_checkout(domain),
+        _safe_dns_hijack(domain),
     )
 
     return build_full_report(
