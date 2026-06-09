@@ -11,6 +11,7 @@ from models.scan import (
     HeaderScanResult, DNSScanResult, SSLScanResult,
     ExposureScanResult, FingerprintScanResult,
     SubdomainScanResult, SecretScanResult,
+    CheckoutScriptScanResult, DNSHijackScanResult,
     FullScanResult, utc_now_iso,
 )
 from scoring_config import SCANNER_WEIGHTS, CRITICAL_CAPS, risk_level
@@ -22,6 +23,8 @@ def _weighted_score(
     ssl: SSLScanResult,
     exposure: ExposureScanResult,
     secrets: SecretScanResult | None = None,
+    checkout_scripts: CheckoutScriptScanResult | None = None,
+    dns_hijack: DNSHijackScanResult | None = None,
 ) -> int:
     raw = (
         ssl.risk_score      * SCANNER_WEIGHTS["ssl"] +
@@ -31,14 +34,19 @@ def _weighted_score(
     )
     if secrets:
         raw += secrets.risk_score * SCANNER_WEIGHTS["secrets"]
+    if checkout_scripts:
+        raw += checkout_scripts.risk_score * SCANNER_WEIGHTS["checkout_scripts"]
+    if dns_hijack:
+        raw += dns_hijack.risk_score * SCANNER_WEIGHTS["dns_hijack"]
     score = min(100, round(raw))
 
     # Collect all critical triggers emitted by scanners
     all_triggers: set[str] = set()
     for result in [headers, dns, ssl, exposure]:
         all_triggers.update(result.critical_triggers)
-    if secrets:
-        all_triggers.update(secrets.critical_triggers)
+    for optional in [secrets, checkout_scripts, dns_hijack]:
+        if optional:
+            all_triggers.update(optional.critical_triggers)
 
     # Apply floor caps: certain findings cannot be averaged away by good hygiene elsewhere
     for trigger, floor in CRITICAL_CAPS.items():
@@ -54,6 +62,8 @@ def _top_findings(
     ssl: SSLScanResult,
     exposure: ExposureScanResult,
     secrets: SecretScanResult | None = None,
+    checkout_scripts: CheckoutScriptScanResult | None = None,
+    dns_hijack: DNSHijackScanResult | None = None,
 ) -> list[dict]:
     candidates: list[dict] = []
     severity_rank = {"high": 3, "medium": 2, "low": 1, "info": 0}
@@ -154,6 +164,30 @@ def _top_findings(
                     "evidence": f"URL: {f.source_url}\nLocation: {f.location}\nPreview: {f.match_preview}",
                 })
 
+    if checkout_scripts:
+        for f in checkout_scripts.findings:
+            if f.severity in ("high", "medium"):
+                candidates.append({
+                    "scanner": "checkout_scripts",
+                    "severity": f.severity,
+                    "title": f.finding_id.replace("_", " ").title(),
+                    "description": f.description,
+                    "remediation": f.remediation,
+                    "evidence": f.evidence,
+                })
+
+    if dns_hijack:
+        for f in dns_hijack.findings:
+            if f.status in ("fail", "warn") and f.severity in ("high", "medium"):
+                candidates.append({
+                    "scanner": "dns_hijack",
+                    "severity": f.severity,
+                    "title": f.check,
+                    "description": f.description,
+                    "remediation": f.remediation,
+                    "evidence": f"DNS hijack check '{f.check}' status: {f.status}",
+                })
+
     candidates.sort(key=lambda c: severity_rank.get(c["severity"], 0), reverse=True)
     return candidates[:10]
 
@@ -167,8 +201,10 @@ def build_full_report(
     fingerprint: FingerprintScanResult,
     subdomains: SubdomainScanResult | None = None,
     secrets: SecretScanResult | None = None,
+    checkout_scripts: CheckoutScriptScanResult | None = None,
+    dns_hijack: DNSHijackScanResult | None = None,
 ) -> FullScanResult:
-    score = _weighted_score(headers, dns, ssl, exposure, secrets)
+    score = _weighted_score(headers, dns, ssl, exposure, secrets, checkout_scripts, dns_hijack)
     return FullScanResult(
         domain=domain,
         scan_timestamp=utc_now_iso(),
@@ -179,7 +215,9 @@ def build_full_report(
         fingerprint=fingerprint,
         subdomains=subdomains,
         secrets=secrets,
+        checkout_scripts=checkout_scripts,
+        dns_hijack=dns_hijack,
         overall_risk_score=score,
         overall_risk_level=risk_level(score),
-        top_findings=_top_findings(headers, dns, ssl, exposure, secrets),
+        top_findings=_top_findings(headers, dns, ssl, exposure, secrets, checkout_scripts, dns_hijack),
     )

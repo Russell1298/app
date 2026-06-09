@@ -189,6 +189,56 @@ class SecretScanResult(BaseModel):
     summary: dict
 
 
+class ScriptEntry(BaseModel):
+    src: str | None
+    is_inline: bool
+    has_sri: bool
+    is_http: bool
+    is_ip_src: bool
+    suspicious_patterns: list[str]
+
+
+class CheckoutScriptFinding(BaseModel):
+    finding_id: str
+    severity: Literal["low", "medium", "high"]
+    description: str
+    remediation: str
+    evidence: str
+    penalty: int = 0
+
+
+class CheckoutScriptScanResult(BaseModel):
+    domain: str
+    scan_timestamp: str
+    pages_scanned: list[str]
+    scripts: list[ScriptEntry]
+    findings: list[CheckoutScriptFinding]
+    risk_score: int
+    risk_level: Literal["low", "medium", "high", "critical"]
+    critical_triggers: list[str] = []
+    summary: dict
+
+
+class DNSHijackFinding(BaseModel):
+    check: str
+    status: Literal["pass", "fail", "warn", "info"]
+    severity: Literal["low", "medium", "high"] | None
+    description: str
+    remediation: str | None
+    penalty: int = 0
+
+
+class DNSHijackScanResult(BaseModel):
+    domain: str
+    scan_timestamp: str
+    resolver_results: dict
+    findings: list[DNSHijackFinding]
+    risk_score: int
+    risk_level: Literal["low", "medium", "high", "critical"]
+    critical_triggers: list[str] = []
+    summary: dict
+
+
 class FullScanResult(BaseModel):
     scan_id: str | None = None
     domain: str
@@ -200,6 +250,8 @@ class FullScanResult(BaseModel):
     fingerprint: FingerprintScanResult
     subdomains: SubdomainScanResult | None = None
     secrets: SecretScanResult | None = None
+    checkout_scripts: CheckoutScriptScanResult | None = None
+    dns_hijack: DNSHijackScanResult | None = None
     overall_risk_score: int
     overall_risk_level: Literal["low", "medium", "high", "critical"]
     top_findings: list[dict]

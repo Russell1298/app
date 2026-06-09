@@ -15,6 +15,8 @@ from scanners.exposure import scan_exposure
 from scanners.fingerprint import scan_fingerprint
 from scanners.subdomain import scan_subdomains
 from scanners.secrets import scan_secrets
+from scanners.checkout_scripts import scan_checkout_scripts
+from scanners.dns_hijack import scan_dns_hijack
 from reports.generator import build_full_report
 from models.scan import FullScanResult
 
@@ -28,6 +30,8 @@ async def run_full_scan(domain: str) -> FullScanResult:
         fingerprint_result,
         subdomain_result,
         secrets_result,
+        checkout_result,
+        dns_hijack_result,
     ) = await asyncio.gather(
         scan_headers(domain),
         scan_dns(domain),
@@ -36,6 +40,8 @@ async def run_full_scan(domain: str) -> FullScanResult:
         scan_fingerprint(domain),
         scan_subdomains(domain),
         scan_secrets(domain),
+        scan_checkout_scripts(domain),
+        scan_dns_hijack(domain),
         return_exceptions=False,
     )
 
@@ -48,4 +54,6 @@ async def run_full_scan(domain: str) -> FullScanResult:
         fingerprint=fingerprint_result,
         subdomains=subdomain_result,
         secrets=secrets_result,
+        checkout_scripts=checkout_result,
+        dns_hijack=dns_hijack_result,
     )
