@@ -272,7 +272,7 @@ def _check_dnssec(domain: str) -> DNSHijackFinding:
     )
 
 
-_INFO_FALLBACK = DNSHijackFinding(
+_TIMEOUT_FINDING = DNSHijackFinding(
     check="unavailable",
     status="info",
     severity=None,
@@ -285,54 +285,95 @@ _INFO_FALLBACK = DNSHijackFinding(
 def _run_all_checks(
     domain: str,
 ) -> tuple[dict[str, list[str]], DNSHijackFinding, DNSHijackFinding, DNSHijackFinding, DNSHijackFinding]:
-    """Run all four DNS-hijack checks concurrently in a thread pool."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+    """Run the four DNS-hijack checks concurrently.
+
+    Uses wait=False on shutdown so stalled DNS threads never block the caller.
+    The asyncio.wait_for in scan_dns_hijack provides the hard outer deadline.
+    """
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+    try:
         f_c  = pool.submit(_check_resolver_consistency, domain)
         f_ff = pool.submit(_check_fast_flux, domain)
         f_mx = pool.submit(_check_mx_anomaly, domain)
         f_ds = pool.submit(_check_dnssec, domain)
 
-        try:
-            resolver_results, consistency_finding = f_c.result(timeout=20)
-        except Exception:
-            resolver_results, consistency_finding = {}, DNSHijackFinding(
-                check="Cross-resolver consistency", status="info", severity=None,
-                description="Resolver comparison timed out.", remediation=None, penalty=0,
-            )
-        try:
-            fast_flux_finding = f_ff.result(timeout=15)
-        except Exception:
-            fast_flux_finding = DNSHijackFinding(
-                check="Fast-flux DNS", status="info", severity=None,
-                description="Fast-flux check timed out.", remediation=None, penalty=0,
-            )
-        try:
-            mx_finding = f_mx.result(timeout=15)
-        except Exception:
-            mx_finding = DNSHijackFinding(
-                check="MX record anomaly", status="info", severity=None,
-                description="MX anomaly check timed out.", remediation=None, penalty=0,
-            )
-        try:
-            dnssec_finding = f_ds.result(timeout=15)
-        except Exception:
-            dnssec_finding = DNSHijackFinding(
-                check="DNSSEC", status="info", severity=None,
-                description="DNSSEC check timed out.", remediation=None, penalty=0,
-            )
+        # Wait up to 16 s for all four; collect whatever finished.
+        done, _ = concurrent.futures.wait([f_c, f_ff, f_mx, f_ds], timeout=16)
+    finally:
+        # Never block — stalled threads are abandoned, not waited on.
+        pool.shutdown(wait=False)
 
+    def _get_or(future, fallback):
+        if future not in done:
+            return fallback
+        try:
+            return future.result()
+        except Exception:
+            return fallback
+
+    resolver_results, consistency_finding = _get_or(
+        f_c,
+        ({}, DNSHijackFinding(
+            check="Cross-resolver consistency", status="info", severity=None,
+            description="Resolver comparison timed out.", remediation=None, penalty=0,
+        )),
+    )
+    fast_flux_finding = _get_or(
+        f_ff,
+        DNSHijackFinding(
+            check="Fast-flux DNS", status="info", severity=None,
+            description="Fast-flux check timed out.", remediation=None, penalty=0,
+        ),
+    )
+    mx_finding = _get_or(
+        f_mx,
+        DNSHijackFinding(
+            check="MX record anomaly", status="info", severity=None,
+            description="MX anomaly check timed out.", remediation=None, penalty=0,
+        ),
+    )
+    dnssec_finding = _get_or(
+        f_ds,
+        DNSHijackFinding(
+            check="DNSSEC", status="info", severity=None,
+            description="DNSSEC check timed out.", remediation=None, penalty=0,
+        ),
+    )
     return resolver_results, consistency_finding, fast_flux_finding, mx_finding, dnssec_finding
 
 
 async def scan_dns_hijack(domain: str) -> DNSHijackScanResult:
     loop = asyncio.get_event_loop()
-    (
-        resolver_results,
-        consistency_finding,
-        fast_flux_finding,
-        mx_finding,
-        dnssec_finding,
-    ) = await loop.run_in_executor(None, _run_all_checks, domain)
+    try:
+        (
+            resolver_results,
+            consistency_finding,
+            fast_flux_finding,
+            mx_finding,
+            dnssec_finding,
+        ) = await asyncio.wait_for(
+            loop.run_in_executor(None, _run_all_checks, domain),
+            timeout=20.0,
+        )
+    except (asyncio.TimeoutError, Exception):
+        # Hard deadline hit — return a safe empty result so the scan still saves.
+        return DNSHijackScanResult(
+            domain=domain,
+            scan_timestamp=utc_now_iso(),
+            resolver_results={},
+            findings=[DNSHijackFinding(
+                check="DNS hijack scan",
+                status="info",
+                severity=None,
+                description="DNS hijack checks could not complete in time and were skipped.",
+                remediation=None,
+                penalty=0,
+            )],
+            risk_score=0,
+            risk_level="low",
+            critical_triggers=[],
+            summary={"checks_run": 0, "timed_out": True},
+        )
 
     findings = [consistency_finding, fast_flux_finding, mx_finding, dnssec_finding]
 
