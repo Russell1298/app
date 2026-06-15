@@ -20,8 +20,17 @@ from db.session import get_db
 from db.models import ScanJob
 from auth.deps import get_optional_user_id, require_user_id
 from api.livefeed_router import limiter
+from netguard import assert_public_host_async, UnsafeTargetError
 
 router = APIRouter(prefix="/api/v1", tags=["scan"])
+
+
+async def _ensure_public(domain: str) -> None:
+    """SSRF guard — reject targets that resolve to private/internal IPs."""
+    try:
+        await assert_public_host_async(domain)
+    except UnsafeTargetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +40,7 @@ router = APIRouter(prefix="/api/v1", tags=["scan"])
 @router.post("/scan/headers", response_model=HeaderScanResult)
 @limiter.limit("20/minute")
 async def scan_security_headers(http_request: Request, request: ScanRequest) -> HeaderScanResult:
+    await _ensure_public(request.domain)
     try:
         return await scan_headers(request.domain)
     except Exception as e:
@@ -40,6 +50,7 @@ async def scan_security_headers(http_request: Request, request: ScanRequest) -> 
 @router.post("/scan/dns", response_model=DNSScanResult)
 @limiter.limit("20/minute")
 async def scan_dns_records(http_request: Request, request: ScanRequest) -> DNSScanResult:
+    await _ensure_public(request.domain)
     try:
         return await scan_dns(request.domain)
     except Exception as e:
@@ -49,6 +60,7 @@ async def scan_dns_records(http_request: Request, request: ScanRequest) -> DNSSc
 @router.post("/scan/ssl", response_model=SSLScanResult)
 @limiter.limit("20/minute")
 async def scan_ssl_tls(http_request: Request, request: ScanRequest) -> SSLScanResult:
+    await _ensure_public(request.domain)
     try:
         return await scan_ssl(request.domain)
     except Exception as e:
@@ -58,6 +70,7 @@ async def scan_ssl_tls(http_request: Request, request: ScanRequest) -> SSLScanRe
 @router.post("/scan/exposure", response_model=ExposureScanResult)
 @limiter.limit("20/minute")
 async def scan_exposure_paths(http_request: Request, request: ScanRequest) -> ExposureScanResult:
+    await _ensure_public(request.domain)
     try:
         return await scan_exposure(request.domain)
     except Exception as e:
@@ -67,6 +80,7 @@ async def scan_exposure_paths(http_request: Request, request: ScanRequest) -> Ex
 @router.post("/scan/fingerprint", response_model=FingerprintScanResult)
 @limiter.limit("20/minute")
 async def scan_fingerprint_tech(http_request: Request, request: ScanRequest) -> FingerprintScanResult:
+    await _ensure_public(request.domain)
     try:
         return await scan_fingerprint(request.domain)
     except Exception as e:
@@ -139,6 +153,8 @@ async def scan_full(
 
     try:
         result = await run_full_scan(request.domain)
+    except UnsafeTargetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Full scan failed: {str(e)}")
 

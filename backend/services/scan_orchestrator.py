@@ -19,6 +19,7 @@ from scanners.secrets import scan_secrets
 from scanners.checkout_scripts import scan_checkout_scripts
 from scanners.dns_hijack import scan_dns_hijack
 from reports.generator import build_full_report
+from netguard import assert_public_host_async
 from models.scan import (
     FullScanResult,
     CheckoutScriptScanResult,
@@ -71,6 +72,10 @@ async def _safe_dns_hijack(domain: str) -> DNSHijackScanResult:
 
 
 async def run_full_scan(domain: str) -> FullScanResult:
+    # SSRF guard: refuse targets that resolve to private/internal/metadata IPs
+    # before any scanner makes an outbound request to them.
+    await assert_public_host_async(domain)
+
     (
         headers_result,
         dns_result,
