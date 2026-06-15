@@ -19,6 +19,7 @@ from reports.html_report import generate_html, generate_pdf
 from db.session import get_db
 from db.models import ScanJob
 from auth.deps import get_optional_user_id, require_user_id
+from api.livefeed_router import limiter
 
 router = APIRouter(prefix="/api/v1", tags=["scan"])
 
@@ -28,7 +29,8 @@ router = APIRouter(prefix="/api/v1", tags=["scan"])
 # ---------------------------------------------------------------------------
 
 @router.post("/scan/headers", response_model=HeaderScanResult)
-async def scan_security_headers(request: ScanRequest) -> HeaderScanResult:
+@limiter.limit("20/minute")
+async def scan_security_headers(http_request: Request, request: ScanRequest) -> HeaderScanResult:
     try:
         return await scan_headers(request.domain)
     except Exception as e:
@@ -36,7 +38,8 @@ async def scan_security_headers(request: ScanRequest) -> HeaderScanResult:
 
 
 @router.post("/scan/dns", response_model=DNSScanResult)
-async def scan_dns_records(request: ScanRequest) -> DNSScanResult:
+@limiter.limit("20/minute")
+async def scan_dns_records(http_request: Request, request: ScanRequest) -> DNSScanResult:
     try:
         return await scan_dns(request.domain)
     except Exception as e:
@@ -44,7 +47,8 @@ async def scan_dns_records(request: ScanRequest) -> DNSScanResult:
 
 
 @router.post("/scan/ssl", response_model=SSLScanResult)
-async def scan_ssl_tls(request: ScanRequest) -> SSLScanResult:
+@limiter.limit("20/minute")
+async def scan_ssl_tls(http_request: Request, request: ScanRequest) -> SSLScanResult:
     try:
         return await scan_ssl(request.domain)
     except Exception as e:
@@ -52,7 +56,8 @@ async def scan_ssl_tls(request: ScanRequest) -> SSLScanResult:
 
 
 @router.post("/scan/exposure", response_model=ExposureScanResult)
-async def scan_exposure_paths(request: ScanRequest) -> ExposureScanResult:
+@limiter.limit("20/minute")
+async def scan_exposure_paths(http_request: Request, request: ScanRequest) -> ExposureScanResult:
     try:
         return await scan_exposure(request.domain)
     except Exception as e:
@@ -60,7 +65,8 @@ async def scan_exposure_paths(request: ScanRequest) -> ExposureScanResult:
 
 
 @router.post("/scan/fingerprint", response_model=FingerprintScanResult)
-async def scan_fingerprint_tech(request: ScanRequest) -> FingerprintScanResult:
+@limiter.limit("20/minute")
+async def scan_fingerprint_tech(http_request: Request, request: ScanRequest) -> FingerprintScanResult:
     try:
         return await scan_fingerprint(request.domain)
     except Exception as e:
@@ -93,6 +99,7 @@ def _get_client_ip(http_request: Request) -> str:
 
 
 @router.post("/scan/full", response_model=FullScanResult)
+@limiter.limit("15/minute")
 async def scan_full(
     request: ScanRequest,
     http_request: Request,
@@ -224,7 +231,7 @@ async def get_scan(
 # Business reports (HTML + PDF)
 # ---------------------------------------------------------------------------
 
-async def _load_scan(scan_id: str, db: AsyncSession | None) -> FullScanResult:
+async def _load_scan(scan_id: str, db: AsyncSession | None, user_id: str | None = None) -> FullScanResult:
     if db is None:
         raise HTTPException(status_code=503, detail="Database not configured")
     try:
@@ -234,7 +241,12 @@ async def _load_scan(scan_id: str, db: AsyncSession | None) -> FullScanResult:
     row = await db.get(ScanJob, job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return FullScanResult.model_validate(row.result)
+    if row.user_id and row.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    result = FullScanResult.model_validate(row.result)
+    result.scan_id = str(row.id)
+    result.paid = row.paid
+    return result
 
 
 @router.get("/scans/{scan_id}/report", response_class=HTMLResponse)
@@ -242,9 +254,9 @@ async def download_html_report(
     scan_id: str,
     client_name: str = Query(default="", description="Client or company name for the cover page"),
     db: AsyncSession | None = Depends(get_db),
+    user_id: str | None = Depends(get_optional_user_id),
 ) -> HTMLResponse:
-    """Return a self-contained HTML business report for the scan."""
-    result = await _load_scan(scan_id, db)
+    result = await _load_scan(scan_id, db, user_id)
     html = generate_html(result, client_name=client_name)
     filename = f"security-report-{result.domain}.html"
     return HTMLResponse(
@@ -258,9 +270,9 @@ async def download_pdf_report(
     scan_id: str,
     client_name: str = Query(default="", description="Client or company name for the cover page"),
     db: AsyncSession | None = Depends(get_db),
+    user_id: str | None = Depends(get_optional_user_id),
 ) -> Response:
-    """Return a PDF business report for the scan."""
-    result = await _load_scan(scan_id, db)
+    result = await _load_scan(scan_id, db, user_id)
     loop = asyncio.get_running_loop()
     pdf_bytes = await loop.run_in_executor(None, generate_pdf, result, client_name)
     filename = f"security-report-{result.domain}.pdf"
