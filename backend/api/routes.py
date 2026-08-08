@@ -18,7 +18,7 @@ from services.scan_orchestrator import run_full_scan
 from reports.html_report import generate_html, generate_pdf
 from db.session import get_db
 from db.models import ScanJob
-from auth.deps import get_optional_user_id, require_user_id
+from auth.deps import get_optional_user_id, require_user_id, get_is_owner
 from api.livefeed_router import limiter
 from netguard import assert_public_host_async, UnsafeTargetError
 
@@ -119,10 +119,11 @@ async def scan_full(
     http_request: Request,
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
+    is_owner: bool = Depends(get_is_owner),
 ) -> FullScanResult:
     client_ip = _get_client_ip(http_request)
 
-    if db is not None:
+    if db is not None and not is_owner:
         if user_id:
             # Logged-in free users: 5 scans per month
             count = await db.scalar(
@@ -134,7 +135,7 @@ async def scan_full(
             if (count or 0) >= FREE_SCAN_LIMIT:
                 raise HTTPException(
                     status_code=402,
-                    detail=f"Monthly scan limit reached ({FREE_SCAN_LIMIT}/{FREE_SCAN_LIMIT}). Upgrade to Pro for unlimited scans.",
+                    detail=f"Monthly scan limit reached ({FREE_SCAN_LIMIT}/{FREE_SCAN_LIMIT}). Upgrade to Starter for unlimited scans.",
                 )
         else:
             # Anonymous users: 1 scan per day per IP
@@ -148,7 +149,7 @@ async def scan_full(
             if (count or 0) >= ANON_DAILY_LIMIT:
                 raise HTTPException(
                     status_code=402,
-                    detail="Daily scan limit reached. Create a free account for 5 scans per month, or unlock a full report for $7.99.",
+                    detail="Daily scan limit reached. Create a free account for 5 scans per month, or upgrade to Starter for unlimited scans.",
                 )
 
     try:
