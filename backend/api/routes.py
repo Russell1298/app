@@ -92,7 +92,7 @@ async def scan_fingerprint_tech(request: Request, body: ScanRequest) -> Fingerpr
 # ---------------------------------------------------------------------------
 
 FREE_SCAN_LIMIT = 5
-ANON_DAILY_LIMIT = 1
+ANON_DAILY_LIMIT = 200  # generous pre-launch cap; the 15/minute rate limit is the real abuse backstop
 
 
 def _start_of_month() -> datetime:
