@@ -199,9 +199,102 @@ def _check_hsts_value(value: str) -> HeaderFinding | None:
     return None
 
 
+def _check_cookies(set_cookie_lines: list[str]) -> list[HeaderFinding]:
+    """
+    Inspect Set-Cookie headers for the Secure, HttpOnly, and SameSite attributes.
+
+    High-traffic sites (logins, carts, sessions) live on these flags: a session
+    cookie without Secure/HttpOnly is the direct path to account takeover. Passive
+    check — reads the same Set-Cookie headers any browser receives.
+    """
+    if not set_cookie_lines:
+        return []
+
+    no_secure: list[str] = []
+    no_httponly: list[str] = []
+    weak_samesite: list[str] = []
+
+    for line in set_cookie_lines:
+        if not line:
+            continue
+        name = line.split("=", 1)[0].strip()
+        low = line.lower()
+        if "secure" not in low:
+            no_secure.append(name)
+        if "httponly" not in low:
+            no_httponly.append(name)
+        samesite = None
+        if "samesite=" in low:
+            samesite = low.split("samesite=", 1)[1].split(";")[0].strip()
+        if samesite is None or samesite == "none":
+            weak_samesite.append(name)
+
+    findings: list[HeaderFinding] = []
+
+    if no_secure:
+        findings.append(HeaderFinding(
+            header="Set-Cookie (Secure)",
+            status="weak",
+            severity="medium",
+            value=", ".join(no_secure[:8]),
+            description=(
+                "One or more cookies are set without the Secure flag. A cookie without Secure "
+                "can be sent over plain HTTP, where anyone on the network path can read it. On "
+                "a busy site this usually includes the session cookie, which means account takeover."
+            ),
+            remediation=(
+                "Add the Secure attribute to every cookie so it is only ever sent over HTTPS. "
+                "Set it where the cookie is created (your app framework or your CDN cookie "
+                f"settings). Affected cookies: {', '.join(no_secure[:8])}."
+            ),
+            penalty=PENALTY["medium"],
+        ))
+
+    if no_httponly:
+        findings.append(HeaderFinding(
+            header="Set-Cookie (HttpOnly)",
+            status="weak",
+            severity="low",
+            value=", ".join(no_httponly[:8]),
+            description=(
+                "One or more cookies are set without the HttpOnly flag, so JavaScript on the "
+                "page can read them. If any script on the site is compromised, session and auth "
+                "cookies can be stolen."
+            ),
+            remediation=(
+                "Add the HttpOnly attribute to cookies that do not need to be read by "
+                "JavaScript, especially session and authentication cookies. Affected cookies: "
+                f"{', '.join(no_httponly[:8])}."
+            ),
+            penalty=PENALTY["low"],
+        ))
+
+    if weak_samesite:
+        findings.append(HeaderFinding(
+            header="Set-Cookie (SameSite)",
+            status="weak",
+            severity="low",
+            value=", ".join(weak_samesite[:8]),
+            description=(
+                "One or more cookies have no SameSite attribute or use SameSite=None. This lets "
+                "the cookie ride along on cross-site requests, which is the basis of cross-site "
+                "request forgery (CSRF)."
+            ),
+            remediation=(
+                "Set SameSite=Lax (or Strict for sensitive actions) on your cookies. Use "
+                "SameSite=None only when a cookie must work across sites, and always pair it with "
+                f"Secure. Affected cookies: {', '.join(weak_samesite[:8])}."
+            ),
+            penalty=PENALTY["low"],
+        ))
+
+    return findings
+
+
 async def scan_headers(domain: str) -> HeaderScanResult:
     url = f"https://{domain}"
     headers_received: dict[str, str] = {}
+    set_cookie_lines: list[str] = []
     redirect_history: list[httpx.Response] = []
     fetch_error: str | None = None
     scanned_url = url
@@ -214,6 +307,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
         ) as client:
             response = await client.get(url)
             headers_received = dict(response.headers)
+            set_cookie_lines = response.headers.get_list("set-cookie")
             scanned_url = str(response.url)
             redirect_history = list(response.history)
     except httpx.ConnectError:
@@ -351,6 +445,13 @@ async def scan_headers(domain: str) -> HeaderScanResult:
             ))
             total_penalty += p
 
+    # Cookie security flags (Secure / HttpOnly / SameSite) — high-value for
+    # sites with sessions, logins, and carts.
+    cookie_findings = _check_cookies(set_cookie_lines)
+    for cf in cookie_findings:
+        findings.append(cf)
+        total_penalty += cf.penalty
+
     if total_penalty <= 20:
         for bonus_header in _BONUS_HEADERS:
             if bonus_header in lower_headers:
@@ -378,5 +479,6 @@ async def scan_headers(domain: str) -> HeaderScanResult:
             "weak": weak_count,
             "passing": passing_count,
             "information_leaks": len(information_leaks),
+            "cookies_flagged": len(cookie_findings),
         },
     )
