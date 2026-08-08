@@ -39,50 +39,50 @@ async def _ensure_public(domain: str) -> None:
 
 @router.post("/scan/headers", response_model=HeaderScanResult)
 @limiter.limit("20/minute")
-async def scan_security_headers(http_request: Request, request: ScanRequest) -> HeaderScanResult:
-    await _ensure_public(request.domain)
+async def scan_security_headers(request: Request, body: ScanRequest) -> HeaderScanResult:
+    await _ensure_public(body.domain)
     try:
-        return await scan_headers(request.domain)
+        return await scan_headers(body.domain)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
 
 
 @router.post("/scan/dns", response_model=DNSScanResult)
 @limiter.limit("20/minute")
-async def scan_dns_records(http_request: Request, request: ScanRequest) -> DNSScanResult:
-    await _ensure_public(request.domain)
+async def scan_dns_records(request: Request, body: ScanRequest) -> DNSScanResult:
+    await _ensure_public(body.domain)
     try:
-        return await scan_dns(request.domain)
+        return await scan_dns(body.domain)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DNS scan failed: {str(e)}")
 
 
 @router.post("/scan/ssl", response_model=SSLScanResult)
 @limiter.limit("20/minute")
-async def scan_ssl_tls(http_request: Request, request: ScanRequest) -> SSLScanResult:
-    await _ensure_public(request.domain)
+async def scan_ssl_tls(request: Request, body: ScanRequest) -> SSLScanResult:
+    await _ensure_public(body.domain)
     try:
-        return await scan_ssl(request.domain)
+        return await scan_ssl(body.domain)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SSL scan failed: {str(e)}")
 
 
 @router.post("/scan/exposure", response_model=ExposureScanResult)
 @limiter.limit("20/minute")
-async def scan_exposure_paths(http_request: Request, request: ScanRequest) -> ExposureScanResult:
-    await _ensure_public(request.domain)
+async def scan_exposure_paths(request: Request, body: ScanRequest) -> ExposureScanResult:
+    await _ensure_public(body.domain)
     try:
-        return await scan_exposure(request.domain)
+        return await scan_exposure(body.domain)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Exposure scan failed: {str(e)}")
 
 
 @router.post("/scan/fingerprint", response_model=FingerprintScanResult)
 @limiter.limit("20/minute")
-async def scan_fingerprint_tech(http_request: Request, request: ScanRequest) -> FingerprintScanResult:
-    await _ensure_public(request.domain)
+async def scan_fingerprint_tech(request: Request, body: ScanRequest) -> FingerprintScanResult:
+    await _ensure_public(body.domain)
     try:
-        return await scan_fingerprint(request.domain)
+        return await scan_fingerprint(body.domain)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fingerprint scan failed: {str(e)}")
 
@@ -105,23 +105,23 @@ def _start_of_today() -> datetime:
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def _get_client_ip(http_request: Request) -> str:
-    forwarded_for = http_request.headers.get("X-Forwarded-For")
+def _get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
-    return http_request.client.host if http_request.client else "unknown"
+    return request.client.host if request.client else "unknown"
 
 
 @router.post("/scan/full", response_model=FullScanResult)
 @limiter.limit("15/minute")
 async def scan_full(
-    request: ScanRequest,
-    http_request: Request,
+    request: Request,
+    body: ScanRequest,
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
     is_owner: bool = Depends(get_is_owner),
 ) -> FullScanResult:
-    client_ip = _get_client_ip(http_request)
+    client_ip = _get_client_ip(request)
 
     if db is not None and not is_owner:
         if user_id:
@@ -153,7 +153,7 @@ async def scan_full(
                 )
 
     try:
-        result = await run_full_scan(request.domain)
+        result = await run_full_scan(body.domain)
     except UnsafeTargetError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
