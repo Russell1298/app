@@ -215,7 +215,33 @@ def _confidence(path: str, body: str) -> str:
     return "likely"
 
 
-async def _probe(client: httpx.AsyncClient, base_url: str, probe: dict) -> ExposureFinding | None:
+# Paths that cannot plausibly exist. If the server answers 200 for these it is
+# serving a catch-all route (a single-page app, or a framework that renders its
+# own 404 page with a 200 status). On such a server a 200 proves nothing, so
+# status code alone must not be treated as evidence of an exposed file.
+_CATCH_ALL_PROBES = (
+    "/sekura-catchall-check-9f3a2b",
+    "/sekura-catchall-check-9f3a2b/index.html",
+)
+
+
+async def _detect_catch_all(client: httpx.AsyncClient, base_url: str) -> bool:
+    for path in _CATCH_ALL_PROBES:
+        try:
+            resp = await client.get(base_url.rstrip("/") + path)
+        except httpx.RequestError:
+            continue
+        if resp.status_code == 200:
+            return True
+    return False
+
+
+async def _probe(
+    client: httpx.AsyncClient,
+    base_url: str,
+    probe: dict,
+    catch_all: bool = False,
+) -> ExposureFinding | None:
     url = base_url.rstrip("/") + probe["path"]
     try:
         resp = await client.get(url)
@@ -228,6 +254,13 @@ async def _probe(client: httpx.AsyncClient, base_url: str, probe: dict) -> Expos
         body = resp.text[:4000]
         conf = _confidence(probe["path"], body)
         sev = probe["severity"]
+
+        # On a catch-all server every path returns 200, so only a positive
+        # content signature counts. Without one, report nothing rather than
+        # accusing the site of exposing a file it does not serve.
+        if catch_all and conf != "confirmed":
+            return None
+
         return ExposureFinding(
             path=probe["path"],
             label=probe["label"],
@@ -283,24 +316,52 @@ async def scan_exposure(domain: str) -> ExposureScanResult:
     base_url = f"https://{domain}"
 
     async with httpx.AsyncClient(follow_redirects=False, timeout=_TIMEOUT, headers=_HEADERS) as client:
-        tasks = [_probe(client, base_url, p) for p in _PROBES]
+        catch_all = await _detect_catch_all(client, base_url)
+        tasks = [_probe(client, base_url, p, catch_all) for p in _PROBES]
         tasks.append(_check_directory_listing(client, base_url))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
     findings: list[ExposureFinding] = [r for r in results if isinstance(r, ExposureFinding)]
 
+    if catch_all:
+        findings.append(ExposureFinding(
+            path="/",
+            label="Server returns 200 for every path",
+            status_code=200,
+            exposed=False,
+            severity="info",
+            description=(
+                "This site answers HTTP 200 for URLs that do not exist, which is normal for a "
+                "single-page app or a framework that renders its own not-found page. Because a "
+                "200 response proves nothing here, a path is only reported as exposed when its "
+                "content actually matches the file we were looking for."
+            ),
+            remediation=(
+                "No action needed for security. If you would rather missing pages return a real "
+                "404, configure your framework or host to send that status for unmatched routes."
+            ),
+            confidence="confirmed",
+            penalty=0,
+        ))
+
     # Only HTTP 200 findings count toward the grouped penalty and triggers
     group_counts: dict[str, int] = defaultdict(int)
+    confirmed_groups: set[str] = set()
     for f in findings:
         if f.exposed and f.status_code == 200 and f.severity != "info":
-            group_counts[_PATH_GROUP.get(f.path, "other")] += 1
+            group = _PATH_GROUP.get(f.path, "other")
+            group_counts[group] += 1
+            if f.confidence == "confirmed":
+                confirmed_groups.add(group)
 
     total_penalty = 0
     critical_triggers: list[str] = []
     for group_name, count in group_counts.items():
         spec = _GROUP_SPEC.get(group_name, _GROUP_SPEC["other"])
         total_penalty += PENALTY[spec["severity"]] + max(0, count - 1) * 2
-        if spec["trigger"] and spec["trigger"] not in critical_triggers:
+        # A critical trigger floors the whole report's score, so it requires
+        # positive evidence from the response body, not just a 200 status.
+        if spec["trigger"] and group_name in confirmed_groups and spec["trigger"] not in critical_triggers:
             critical_triggers.append(spec["trigger"])
 
     risk = scanner_score(total_penalty, "exposure")
@@ -320,5 +381,6 @@ async def scan_exposure(domain: str) -> ExposureScanResult:
             "paths_checked": len(_PROBES) + 1,
             "exposed": len(exposed),
             "informational": len(info),
+            "catch_all_routing": catch_all,
         },
     )
