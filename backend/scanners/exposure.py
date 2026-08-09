@@ -1,9 +1,13 @@
 """
 Exposure scanner.
 
-Makes targeted passive HTTP GET requests to well-known paths that should
-never be publicly accessible. Groups related findings and emits
-critical_triggers for the overall score cap logic.
+Makes targeted HTTP GET requests to well-known paths that should never be
+publicly accessible. This is an ACTIVE check: it sends requests a typical
+visitor would not, which is the only way to determine reachability. It is
+non-intrusive (read-only, no exploitation), but it is not passive.
+
+Groups related findings and emits critical_triggers for the overall score
+cap logic.
 
 Only HTTP 200 responses count as exposures. HTTP 403 means the path exists
 but is correctly restricted — shown as informational, never penalised.

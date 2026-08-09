@@ -642,9 +642,14 @@
     <div class="page-subheading">What was tested, how, and what is out of scope</div>
 
     <div class="callout">
-      This assessment is fully <strong>passive and non-invasive</strong>. No traffic was generated beyond
-      what a normal browser visit produces, no authentication was attempted, and no exploit code
-      was executed. All findings are based on publicly observable information only.
+      This assessment is <strong>read-only and non-intrusive</strong>. Nothing was modified on the target
+      and nothing was installed. No authentication was attempted and no exploit code was executed.
+      Several checks are fully passive and never contacted the target: DNS and email record lookups
+      used public resolvers, and subdomain discovery read public certificate transparency logs. The
+      remaining checks sent ordinary HTTP GET requests. One check, Public Exposure, requested a fixed
+      list of common file and directory paths to determine whether any were publicly reachable; those
+      requests may appear in the target's access logs. All findings are based on publicly observable
+      information only.
     </div>
 
     <div class="section-title">Target Scope</div>
@@ -1230,7 +1235,7 @@
 <!-- Minimal closing line — no separate page -->
 <div class="doc-footer">
   <span>SiteGuard — Website Security Assessment · {{ result.domain }}</span>
-  <span>Generated {{ scan_date }} · Passive scan only, no exploitation</span>
+  <span>Generated {{ scan_date }} · Read-only assessment, no exploitation</span>
   <span>This report reflects the publicly visible security posture at the time of scanning.</span>
 </div>
 

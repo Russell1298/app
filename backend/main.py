@@ -30,7 +30,7 @@ _origins = [o.strip() for o in _raw.split(",") if o.strip()]
 
 app = FastAPI(
     title="SiteGuard API",
-    description="Defensive security assessment API — passive scanning only.",
+    description="Defensive security assessment API. Read-only, non-intrusive checks; no exploitation.",
     version="0.2.0",
     lifespan=lifespan,
 )
