@@ -140,7 +140,7 @@ def _check_spf(domain: str) -> DNSFinding:
             ),
             remediation=(
                 "Add an SPF record so other mail servers know which servers are allowed "
-                "to send email as your domain — this blocks scammers from spoofing you. "
+                "to send email as your domain. This blocks scammers from spoofing you. "
                 "In your DNS settings add a TXT record. Your email provider gives you the "
                 "exact value; for example Google Workspace uses: v=spf1 include:_spf.google.com -all"
             ),
@@ -167,8 +167,8 @@ def _check_spf(domain: str) -> DNSFinding:
             check="SPF",
             status="fail",
             severity="high",
-            description=f"SPF uses '+all' — anyone can spoof your domain: {spf!r}",
-            remediation="Your SPF record ends in '+all', which lets anyone send email as your domain — the opposite of what you want. Change '+all' to '-all' in your TXT record.",
+            description=f"SPF uses '+all', so anyone can send email as your domain: {spf!r}",
+            remediation="Your SPF record ends in '+all', which lets any server send email as your domain. Change '+all' to '-all' in your TXT record.",
             penalty=PENALTY["high"],
         )
     if "?all" in spf:
@@ -176,8 +176,8 @@ def _check_spf(domain: str) -> DNSFinding:
             check="SPF",
             status="warn",
             severity="medium",
-            description=f"SPF uses '?all' (neutral) — no rejection of spoofed mail: {spf!r}",
-            remediation="Your SPF record ends in '?all' (neutral), so spoofed mail isn't rejected. Once you've confirmed all your real mail sources are listed, change '?all' to '-all'.",
+            description=f"SPF uses '?all' (neutral), so spoofed mail is accepted: {spf!r}",
+            remediation="Your SPF record ends in '?all' (neutral), which tells receiving servers to accept mail that fails the check. Once every real mail source is listed, change '?all' to '-all'.",
             penalty=PENALTY["medium"],
         )
     if "~all" in spf:
@@ -185,8 +185,8 @@ def _check_spf(domain: str) -> DNSFinding:
             check="SPF",
             status="warn",
             severity="low",
-            description=f"SPF uses '~all' (softfail) — unauthorised senders flagged but not rejected: {spf!r}",
-            remediation="Your SPF record ends in '~all' (softfail), so fake mail is only flagged, not blocked. After confirming your legitimate senders are all listed, tighten it to '-all'.",
+            description=f"SPF uses '~all' (softfail), so unauthorised senders are flagged and still delivered: {spf!r}",
+            remediation="Your SPF record ends in '~all' (softfail), which flags fake mail and still delivers it. Once every legitimate sender is listed, tighten it to '-all'.",
             penalty=PENALTY["low"],
         )
 
@@ -235,14 +235,14 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
     if policy == "none":
         return (record, DNSFinding(
             check="DMARC", status="warn", severity="medium",
-            description=f"DMARC policy is 'none' — failing messages are not quarantined or rejected: {dmarc!r}",
-            remediation="Your DMARC policy is set to p=none, which only monitors and doesn't stop spoofed email. Once you've reviewed your reports, change it to p=quarantine, then later p=reject for full protection.",
+            description=f"DMARC policy is 'none', so failing messages are delivered normally: {dmarc!r}",
+            remediation="Your DMARC policy is set to p=none, which reports on spoofed email and still delivers it. Once you have reviewed your reports, change it to p=quarantine, then to p=reject.",
             penalty=PENALTY["medium"],
         ))
     if policy == "quarantine":
         return (record, DNSFinding(
             check="DMARC", status="warn", severity="low",
-            description=f"DMARC policy is 'quarantine' — failing messages go to spam: {dmarc!r}",
+            description=f"DMARC policy is 'quarantine', so failing messages go to spam: {dmarc!r}",
             remediation="Your DMARC is set to p=quarantine (fake mail goes to spam). For the strongest protection, change it to p=reject once you're confident your legitimate email passes.",
             penalty=PENALTY["low"],
         ))
@@ -268,7 +268,7 @@ def _check_caa(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
         DNSFinding(
             check="CAA", status="warn", severity="low",
             description="No CAA records. Any CA can issue certificates for this domain.",
-            remediation='Add a CAA record to control which certificate authorities can issue SSL certificates for your domain. In your DNS, add a CAA record like: 0 issue "letsencrypt.org" (use whichever CA you actually use). This stops other CAs from issuing certs for you.',
+            remediation='Add a CAA record to control which certificate authorities can issue SSL certificates for your domain. In your DNS, add a CAA record like: 0 issue "letsencrypt.org" (use whichever CA issues your certificates). This stops other CAs from issuing certs for you.',
             penalty=PENALTY["low"],
         ),
     )
@@ -279,16 +279,16 @@ def _check_dnssec(domain: str) -> DNSFinding:
     ds_values = _query(domain, "DS")
     if ds_values:
         return DNSFinding(check="DNSSEC", status="pass", severity=None,
-                         description="DNSSEC DS record found — DNS responses are signed.",
+                         description="DNSSEC DS record found. DNS responses are signed.",
                          remediation=None, penalty=0)
     dnskey_values = _query(domain, "DNSKEY")
     if dnskey_values:
         return DNSFinding(check="DNSSEC", status="pass", severity=None,
-                         description="DNSSEC DNSKEY record found — DNS responses are signed.",
+                         description="DNSSEC DNSKEY record found. DNS responses are signed.",
                          remediation=None, penalty=0)
     return DNSFinding(
         check="DNSSEC", status="info", severity=None,
-        description="DNSSEC is not configured. Reported for information only — not penalised.",
+        description="DNSSEC is not configured. Reported for information only, with no effect on your score.",
         remediation="DNSSEC adds tamper-proofing to your DNS so visitors can't be silently redirected. Many registrars (and Cloudflare) let you turn it on with one click in the domain's settings. Optional, but a nice extra layer.",
         penalty=0,
     )

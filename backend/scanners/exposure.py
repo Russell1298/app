@@ -31,7 +31,7 @@ _PROBES: list[dict] = [
         "description": (
             "The /.git/HEAD path returned an HTTP 200 response. If the .git directory "
             "is truly accessible, an attacker may retrieve source code, commit history, "
-            "and any credentials ever committed — even if later removed."
+            "and any credentials ever committed, including ones later removed."
         ),
         "remediation": "Your .git folder is reachable from the web, which can leak your entire source code and any passwords ever committed. Block it. On Nginx: location ~ /\\.git { deny all; } On Apache: RedirectMatch 404 /\\.git. Better yet, keep the .git folder out of your public web folder entirely.",
     },
@@ -60,8 +60,8 @@ _PROBES: list[dict] = [
         "path": "/robots.txt",
         "label": "robots.txt present",
         "severity": "info",
-        "description": "robots.txt is present. Review Disallow entries — those paths are still accessible to humans and malicious crawlers.",
-        "remediation": "robots.txt is fine to have, but remember anything you list under 'Disallow' is still public — it just asks crawlers not to index it. Don't rely on it to hide sensitive pages; protect those with a login or IP restriction instead.",
+        "description": "robots.txt is present. Review the Disallow entries, because those paths stay reachable by anyone who reads the file.",
+        "remediation": "Anything listed under 'Disallow' stays publicly reachable. The file asks well-behaved crawlers to skip those paths and nothing more. Protect sensitive pages with a login or an IP restriction.",
     },
     {
         "path": "/sitemap.xml",
@@ -96,7 +96,7 @@ _PROBES: list[dict] = [
         "label": "phpMyAdmin endpoint accessible",
         "severity": "high",
         "description": "A phpMyAdmin endpoint appears to be accessible. Without IP restriction this is a high-value target for automated attacks.",
-        "remediation": "phpMyAdmin gives direct access to your database and is reachable from the web — a serious risk. Remove it from your public web folder or restrict it to localhost only, and reach it through an SSH tunnel when you need it.",
+        "remediation": "phpMyAdmin gives direct access to your database and is currently reachable from the web. Remove it from your public web folder, or restrict it to localhost and reach it through an SSH tunnel when you need it.",
     },
     {
         "path": "/adminer.php",
@@ -130,7 +130,7 @@ _PROBES: list[dict] = [
         "path": "/.well-known/security.txt",
         "label": "security.txt",
         "severity": "info",
-        "description": "security.txt is present — a positive signal providing a responsible disclosure contact.",
+        "description": "security.txt is present. It gives security researchers a contact route for reporting issues.",
         "remediation": None,
     },
     {
@@ -145,7 +145,7 @@ _PROBES: list[dict] = [
         "label": "Symfony profiler accessible",
         "severity": "high",
         "description": "A Symfony profiler endpoint appears accessible. In production it can expose requests, env vars, DB queries, and credentials.",
-        "remediation": "The Symfony profiler is exposed, which in production can reveal requests, environment variables, and database queries. Disable it in production: set web_profiler.toolbar: false and make sure APP_ENV is 'prod', not 'dev'.",
+        "remediation": "The Symfony profiler is exposed, which in production can reveal requests, environment variables, and database queries. Disable it in production: set web_profiler.toolbar: false and set APP_ENV to 'prod'.",
     },
     {
         "path": "/telescope",
@@ -305,7 +305,7 @@ async def _check_directory_listing(client: httpx.AsyncClient, base_url: str) -> 
             exposed=True,
             severity="medium",
             description="The web root returns a directory listing, allowing visitors to browse files.",
-            remediation="Your web server is showing a browsable list of your files. Turn it off. On Nginx: autoindex off; On Apache: Options -Indexes. Then add an index page (like index.html) so the folder isn't wide open.",
+            remediation="Your web server is showing a browsable list of your files. Turn it off. On Nginx: autoindex off; On Apache: Options -Indexes. Then add an index page such as index.html so the folder is no longer browsable.",
             confidence="confirmed",
             penalty=PENALTY["medium"],
         )
@@ -334,7 +334,7 @@ async def scan_exposure(domain: str) -> ExposureScanResult:
                 "This site answers HTTP 200 for URLs that do not exist, which is normal for a "
                 "single-page app or a framework that renders its own not-found page. Because a "
                 "200 response proves nothing here, a path is only reported as exposed when its "
-                "content actually matches the file we were looking for."
+                "content matches the file we were looking for."
             ),
             remediation=(
                 "No action needed for security. If you would rather missing pages return a real "

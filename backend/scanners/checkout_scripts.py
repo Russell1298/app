@@ -148,7 +148,7 @@ def _build_findings(
                     description=(
                         f"A JavaScript file is loaded over plain HTTP: {src}. "
                         "An attacker on the same network can silently replace the script "
-                        "content in transit — the exact delivery mechanism for payment skimmers."
+                        "content in transit. This is how payment skimmers get delivered."
                     ),
                     remediation=(
                         "Change the script URL to HTTPS. If the provider doesn't support HTTPS, "
@@ -168,7 +168,7 @@ def _build_findings(
                     description=(
                         f"A script is loaded directly from an IP address: {src}. "
                         "Legitimate analytics, CDNs, and payment providers always use named "
-                        "domains, not bare IPs. This is a strong indicator of a Magecart-style "
+                        "domains. A bare IP here is a strong indicator of a Magecart-style "
                         "payment skimmer injected into the page."
                     ),
                     remediation=(
@@ -197,7 +197,7 @@ def _build_findings(
                         f"An external script on a checkout page has no Subresource Integrity "
                         f"(SRI) attribute: {src}. "
                         "If the script's host is ever compromised, the browser will silently "
-                        "execute the modified code — the exact attack model used by Magecart "
+                        "execute the modified code. This is the attack model Magecart uses "
                         "skimmers targeting online stores."
                     ),
                     remediation=(
@@ -228,7 +228,7 @@ def _build_findings(
                         ),
                         remediation=(
                             "Audit all inline JavaScript on this page. If you didn't write this "
-                            "code, treat it as a potential compromise — check your plugins and "
+                            "code, treat it as a potential compromise. Check your plugins and "
                             "theme files for recent unexplained modifications. "
                             "Consider a CSP that blocks all inline scripts."
                         ),

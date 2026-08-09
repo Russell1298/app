@@ -89,7 +89,7 @@ def _check_resolver_consistency(domain: str) -> tuple[dict[str, list[str]], DNSH
             check="Cross-resolver consistency",
             status="info",
             severity=None,
-            description="Fewer than two resolvers returned results — cannot compare.",
+            description="Fewer than two resolvers returned results, so there is nothing to compare.",
             remediation=None,
             penalty=0,
         )
@@ -124,7 +124,7 @@ def _check_resolver_consistency(domain: str) -> tuple[dict[str, list[str]], DNSH
             "Compare your DNS registrar's published records against what each resolver "
             "returns. If you made no recent DNS changes, contact your registrar and DNS "
             "provider immediately to investigate unauthorised modifications. Enable DNSSEC "
-            "— it cryptographically signs records so any tampering becomes detectable."
+            "DNSSEC signs your records so any tampering becomes detectable."
         ),
         penalty=PENALTY["high"],
     )
@@ -185,7 +185,7 @@ def _check_fast_flux(domain: str) -> DNSHijackFinding:
         check="Fast-flux DNS",
         status="pass",
         severity=None,
-        description=f"A record TTL={ttl}s with {len(ips)} IP(s) — no fast-flux indicators.",
+        description=f"A record TTL={ttl}s with {len(ips)} IP(s). No fast-flux indicators.",
         remediation=None,
         penalty=0,
     )
@@ -220,7 +220,7 @@ def _check_mx_anomaly(domain: str) -> DNSHijackFinding:
                 "Log in to your DNS provider and verify who changed your MX records. "
                 "Real mail services (Google Workspace, Microsoft 365, Proofpoint, etc.) "
                 "always use hostnames. If you didn't make this change, your DNS account "
-                "may be compromised — change your provider password immediately and "
+                "may be compromised. Change your provider password immediately and "
                 "review recent access logs."
             ),
             penalty=PENALTY["high"],
@@ -246,7 +246,7 @@ def _check_dnssec(domain: str) -> DNSHijackFinding:
                     check="DNSSEC",
                     status="pass",
                     severity=None,
-                    description=f"DNSSEC {rdtype} record found — DNS responses are cryptographically signed.",
+                    description=f"DNSSEC {rdtype} record found. DNS responses are cryptographically signed.",
                     remediation=None,
                     penalty=0,
                 )

@@ -98,7 +98,7 @@ def _findings_from_cert(
         findings.append(SSLFinding(
             check="Self-signed certificate", status="fail", severity="high",
             description="The certificate is self-signed and will not be trusted by browsers.",
-            remediation="Your SSL certificate is self-signed, so browsers show a scary warning to every visitor. Replace it with a free, trusted certificate from Let's Encrypt — most hosts have a one-click option, or use Certbot if you manage your own server.",
+            remediation="Your SSL certificate is self-signed, so every visitor gets a browser warning before reaching your site. Replace it with a free trusted certificate from Let's Encrypt. Most hosts have a one-click option; use Certbot if you manage the server yourself.",
             penalty=PENALTY["high"],
         ))
         triggers.append("cert_self_signed")
@@ -113,7 +113,7 @@ def _findings_from_cert(
         findings.append(SSLFinding(
             check="Certificate verification", status="fail", severity="high",
             description=f"Certificate failed verification: {verify_error}",
-            remediation="Your certificate didn't pass validation — usually the certificate chain is incomplete or doesn't match your domain name. Reinstall the full chain (your cert plus the CA's intermediate certs) from your certificate provider.",
+            remediation="Your certificate failed validation. The usual cause is an incomplete certificate chain or a name mismatch. Reinstall the full chain, meaning your certificate plus the intermediate certificates from your provider.",
             penalty=PENALTY["high"],
         ))
 
@@ -128,7 +128,7 @@ def _findings_from_cert(
     elif cert.days_until_expiry <= EXPIRY_CRITICAL_DAYS:
         findings.append(SSLFinding(
             check="Certificate expiry", status="fail", severity="high",
-            description=f"Certificate expires in {cert.days_until_expiry} day(s) — renewal is urgent.",
+            description=f"Certificate expires in {cert.days_until_expiry} day(s). Renew it now.",
             remediation="Your SSL certificate expires within a week. Renew it now to avoid security warnings. Let's Encrypt users can run 'certbot renew'; most hosting panels have a renew button. Turn on auto-renewal if you can.",
             penalty=PENALTY["high"],
         ))
@@ -185,7 +185,7 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
         findings.append(SSLFinding(
             check="TLS 1.1", status="fail", severity="medium",
             description="TLS 1.1 is supported. Deprecated protocol lacking modern cipher support.",
-            remediation="Turn off TLS 1.1 along with TLS 1.0 — both are outdated. Set your server to allow only TLS 1.2 and 1.3 (Nginx: ssl_protocols TLSv1.2 TLSv1.3;), then reload.",
+            remediation="Turn off TLS 1.1 along with TLS 1.0. Both are outdated. Set your server to allow only TLS 1.2 and 1.3 (Nginx: ssl_protocols TLSv1.2 TLSv1.3;), then reload.",
             penalty=PENALTY["medium"],
         ))
     elif version_map.get("TLS 1.1") is False:
@@ -237,18 +237,18 @@ def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFindin
             findings.append(SSLFinding(
                 check="TLS 1.2", status="fail", severity="high",
                 description="TLS 1.2 is not supported. Many clients require TLS 1.2 as a minimum.",
-                remediation="Enable TLS 1.2 — many browsers and apps need it as a minimum. On Nginx add it to ssl_protocols TLSv1.2 TLSv1.3; and reload. You may need to update OpenSSL if it's an old server.",
+                remediation="Enable TLS 1.2. Many browsers and apps require it as a minimum. On Nginx add it to ssl_protocols TLSv1.2 TLSv1.3; and reload. An older server may also need OpenSSL updated.",
                 penalty=PENALTY["high"],
             ))
         if tls13 is True:
             findings.append(SSLFinding(check="TLS 1.3", status="pass", severity=None,
-                                       description="TLS 1.3 is supported — best available protocol.",
+                                       description="TLS 1.3 is supported. This is the current protocol version.",
                                        remediation=None, penalty=0))
         elif tls13 is False:
             findings.append(SSLFinding(
                 check="TLS 1.3", status="warn", severity="low",
                 description="TLS 1.3 is not supported. TLS 1.3 is faster and more secure than TLS 1.2.",
-                remediation="Your server supports TLS 1.2 but not the newer, faster TLS 1.3. Turn it on — most modern servers support it with an up-to-date OpenSSL. On Nginx: ssl_protocols TLSv1.2 TLSv1.3;",
+                remediation="Your server supports TLS 1.2 and stops there. Turn on TLS 1.3 as well. Most current servers support it with an up-to-date OpenSSL. On Nginx: ssl_protocols TLSv1.2 TLSv1.3;",
                 penalty=PENALTY["low"],
             ))
 

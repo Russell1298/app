@@ -27,7 +27,7 @@ REQUIRED_HEADERS: list[dict] = [
             "and content you trust. On WordPress, a security plugin like Wordfence can "
             "set it for you. On your own Nginx or Apache server, add the header starting "
             "with \"default-src 'self'\" and allow more only where your site needs it. "
-            "Tip: turn it on in report-only mode first so you don't break anything."
+            "Turn it on in report-only mode first to see what it would block."
         ),
     },
     {
@@ -71,7 +71,7 @@ REQUIRED_HEADERS: list[dict] = [
         "remediation": (
             "Add the header X-Content-Type-Options: nosniff. This stops browsers from "
             "guessing file types, which can turn a harmless upload into a running script. "
-            "It's a single line in your server or CDN config and safe to add."
+            "It is one line in your server or CDN config."
         ),
     },
     {
@@ -85,7 +85,7 @@ REQUIRED_HEADERS: list[dict] = [
         "remediation": (
             "Add the header Referrer-Policy: strict-origin-when-cross-origin. This keeps "
             "your full page URLs from leaking to other websites visitors click through to. "
-            "Safe to add for almost every site."
+            "This applies to almost every site."
         ),
     },
     {
@@ -98,7 +98,7 @@ REQUIRED_HEADERS: list[dict] = [
         ),
         "remediation": (
             "Add the header Permissions-Policy: camera=(), microphone=(), geolocation=() "
-            "to block access to the camera, mic, and location unless your site actually "
+            "to block access to the camera, mic, and location unless your site "
             "uses them. Adjust the list if you do need one of these."
         ),
     },
@@ -376,11 +376,11 @@ async def scan_headers(domain: str) -> HeaderScanResult:
                     value=csp_ro_value,
                     description=(
                         "Content-Security-Policy is in report-only mode. "
-                        "Violations are monitored but not blocked — XSS attacks are still possible."
+                        "Violations are recorded and allowed through. XSS attacks remain possible."
                     ),
                     remediation=(
                         "Your Content-Security-Policy is in 'report-only' mode, so it watches "
-                        "for problems but doesn't actually block anything. Once you've checked "
+                        "for problems without blocking anything. Once you have checked "
                         "the reports and nothing legitimate is flagged, rename the header from "
                         "Content-Security-Policy-Report-Only to Content-Security-Policy to turn "
                         "on real protection."
