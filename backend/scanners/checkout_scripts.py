@@ -240,7 +240,7 @@ def _build_findings(
                         "Add an integrity= attribute to the <script> tag. Generate the hash with: "
                         "curl -s <URL> | openssl dgst -sha384 -binary | openssl base64 -A "
                         "then set: integrity=\"sha384-<hash>\" crossorigin=\"anonymous\". "
-                        "Consider a payment-focused CSP that blocks unauthorised script sources."
+                        "Consider a payment-focused CSP that blocks unauthorized script sources."
                     ),
                     evidence=f"Page: {page_url}\nScript src: {src}\nSRI: absent",
                     penalty=PENALTY["high"],

@@ -14,6 +14,16 @@ from models.scan import FullScanResult
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 _jinja = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=True)
 
+# Single source for the details that identify us on a client-facing document.
+COMPANY = {
+    "name":     "Sekura",
+    "tagline":  "Website security assessment and remediation for small business.",
+    "location": "Seattle, WA",
+    "email":    "russell.p@sekura.cloud",
+    "website":  "sekura.cloud",
+    "methodology_url": "sekura.cloud/security",
+}
+
 # ---------------------------------------------------------------------------
 # Business language mappings
 # ---------------------------------------------------------------------------
@@ -33,7 +43,7 @@ _BUSINESS_IMPACT: dict[str, str] = {
     "X-Frame-Options": (
         "Your website can be embedded invisibly inside another page. Attackers use this "
         "technique, called clickjacking, to trick your customers into clicking buttons "
-        "they cannot see, such as authorising payments or changing account settings."
+        "they cannot see, such as authorizing payments or changing account settings."
     ),
     "X-Content-Type-Options": (
         "Browsers may misinterpret files served by your website and execute them as a "
@@ -377,8 +387,8 @@ def _executive_summary(result: FullScanResult, findings: list[dict]) -> str:
         )
     elif medium > 0:
         close = (
-            "Addressing the identified issues will meaningfully reduce the organisation's "
-            "exposure to common web-based threats."
+            "Addressing the identified issues will reduce this website's exposure to "
+            "common web-based threats."
         )
     else:
         close = (
@@ -474,6 +484,7 @@ def generate_html(
     context = {
         "result":             result,
         "security_score":     max(0, 100 - result.overall_risk_score),
+        "company":            COMPANY,
         "client_name":        client_name,
         "scan_date":          datetime.now(timezone.utc).strftime("%d %B %Y"),
         "executive_summary":  _executive_summary(result, all_findings),

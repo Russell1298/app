@@ -487,7 +487,7 @@
 
   <div class="cover-logo">
     <span class="cover-logo-icon" style="color:#0f2d5a;font-weight:800">S</span>
-    Sekura
+    {{ company.name }}
   </div>
 
   <div class="cover-label">Website Security Assessment</div>
@@ -525,7 +525,10 @@
   </div>
 
   <div class="cover-meta">
-    <span>{% if client_name %}Prepared for: <strong style="opacity:0.9">{{ client_name }}</strong>{% else %}Confidential{% endif %}</span>
+    <span>
+      {% if client_name %}Prepared for <strong style="opacity:0.9">{{ client_name }}</strong> by {{ company.name }}
+      {% else %}Prepared by {{ company.name }}, {{ company.location }}{% endif %}
+    </span>
     <span>{{ scan_date }}</span>
     {% if result.scan_id %}<span>ID: {{ result.scan_id[:8] }}</span>{% endif %}
   </div>
@@ -644,12 +647,13 @@
     <div class="callout">
       This assessment is <strong>read-only and non-intrusive</strong>. Nothing was modified on the target
       and nothing was installed. No authentication was attempted and no exploit code was executed.
-      Several checks are fully passive and never contacted the target: DNS and email record lookups
-      used public resolvers, and subdomain discovery read public certificate transparency logs. The
-      remaining checks sent ordinary HTTP GET requests. One check, Public Exposure, requested a fixed
-      list of common file and directory paths to determine whether any were publicly reachable; those
-      requests may appear in the target's access logs. All findings are based on publicly observable
-      information only.
+      Three of the nine modules are fully passive and never contacted the target: DNS and email record
+      lookups and DNS hijack detection both queried public resolvers, and subdomain discovery read
+      public certificate transparency logs. The remaining modules sent ordinary HTTPS requests. One
+      module, Public Exposure, requested a fixed list of 18 common file and directory paths to
+      determine whether any were publicly reachable; those requests may appear in the target's access
+      logs and a web application firewall may record them as a scan. All findings are based on
+      publicly observable information only.
     </div>
 
     <div class="section-title">Target Scope</div>
@@ -669,7 +673,7 @@
       </div>
       <div class="method-card">
         <div class="method-card-title">DNS &amp; Email</div>
-        <div class="method-card-body">Analyses DNS records for SPF, DMARC, DNSSEC, CAA, and other email authentication controls.</div>
+        <div class="method-card-body">Reads DNS records through public resolvers and checks SPF, DMARC, CAA, and other email authentication controls.</div>
       </div>
       <div class="method-card">
         <div class="method-card-title">SSL / TLS</div>
@@ -677,7 +681,7 @@
       </div>
       <div class="method-card">
         <div class="method-card-title">Public Exposure</div>
-        <div class="method-card-body">Probes common sensitive paths (.git, .env, admin panels, debug endpoints) and checks response bodies to assess confidence.</div>
+        <div class="method-card-body">Requests 18 common sensitive paths (.git, .env, admin panels, debug endpoints) once each. Where a path responds, the opening bytes of the body are read to rate confidence. File contents are not stored.</div>
       </div>
       <div class="method-card">
         <div class="method-card-title">Subdomain Discovery</div>
@@ -685,7 +689,7 @@
       </div>
       <div class="method-card">
         <div class="method-card-title">Secret Exposure</div>
-        <div class="method-card-body">Scans the homepage HTML and linked JavaScript files for accidentally published credentials and API keys.</div>
+        <div class="method-card-body">Reads the homepage HTML and up to five linked JavaScript files, looking for published credentials and API keys. Matches are redacted before storage.</div>
       </div>
       <div class="method-card">
         <div class="method-card-title">Fingerprinting</div>
@@ -697,7 +701,7 @@
       </div>
       <div class="method-card">
         <div class="method-card-title">DNS Hijack Detection</div>
-        <div class="method-card-body">Compares answers from several public DNS resolvers to detect tampering, and checks whether DNSSEC protects the domain's records.</div>
+        <div class="method-card-body">Compares answers from three independent public DNS resolvers to detect tampering, and checks whether DNSSEC signs the domain's records.</div>
       </div>
     </div>
 
@@ -708,6 +712,11 @@
       and manual code review. Findings reflect publicly observable signals; exploitability
       was not confirmed. For a full penetration test, engage a certified security professional.
     </div>
+
+    <p style="color:#64748b;font-size:9pt;margin-top:12px">
+      The full method for every module, including exactly what each one sends, is published at
+      {{ company.methodology_url }}.
+    </p>
   </div>
 
 </div>
@@ -1081,7 +1090,7 @@
   <div class="section">
     <h3>Credential Exposure Details</h3>
     <p style="color:#64748b;font-size:9.5pt;margin-bottom:10px">
-      Matches are partially redacted. Real credentials are never stored in this report.
+      Matches are partially redacted. Full credential values are never stored in this report.
     </p>
     <table>
       <tr><th>Pattern</th><th>Severity</th><th>Location</th><th>Preview (redacted)</th></tr>
@@ -1202,7 +1211,7 @@
 <div class="content page-break">
 
   <div class="page-heading">Remediation Roadmap</div>
-  <div class="page-subheading">Prioritised action plan ordered by risk impact</div>
+  <div class="page-subheading">Action plan ordered by risk impact</div>
 
   {% if roadmap.immediate %}
   <div class="roadmap-phase">
@@ -1267,11 +1276,31 @@
   </p>
   {% endif %}
 
+  <!-- Who produced this and how to reach them -->
+  <div class="section" style="margin-top:26px">
+    <div class="section-title">Prepared By</div>
+    <div style="display:flex;gap:28px;align-items:flex-start">
+      <div style="flex:1">
+        <div style="font-size:13pt;font-weight:800;color:#0f2d5a">{{ company.name }}</div>
+        <div style="font-size:9.5pt;color:#475569;margin-top:3px">{{ company.tagline }}</div>
+        <div style="font-size:9.5pt;color:#475569;margin-top:10px">
+          {{ company.email }}<br>
+          {{ company.website }}<br>
+          {{ company.location }}
+        </div>
+      </div>
+      <div style="flex:1;font-size:9.5pt;color:#475569;line-height:1.6">
+        Every finding above lists the steps to fix it. Email us to have the work carried
+        out, or to talk through anything in this report. We answer within one business day.
+      </div>
+    </div>
+  </div>
+
 </div>
 
-<!-- Minimal closing line — no separate page -->
+<!-- Minimal closing line, no separate page -->
 <div class="doc-footer">
-  <span>Sekura Website Security Assessment: {{ result.domain }}</span>
+  <span>{{ company.name }} Website Security Assessment: {{ result.domain }}</span>
   <span>Generated {{ scan_date }}. Read-only assessment, no exploitation.</span>
   <span>This report reflects the publicly visible security posture at the time of scanning.</span>
 </div>

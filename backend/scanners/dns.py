@@ -186,7 +186,7 @@ def _check_spf(domain: str) -> DNSFinding:
             check="SPF",
             status="warn",
             severity="low",
-            description=f"SPF uses '~all' (softfail), so unauthorised senders are flagged and still delivered: {spf!r}",
+            description=f"SPF uses '~all' (softfail), so unauthorized senders are flagged and still delivered: {spf!r}",
             remediation="Your SPF record ends in '~all' (softfail), which flags fake mail and still delivers it. Once every legitimate sender is listed, tighten it to '-all'.",
             penalty=PENALTY["low"],
         )

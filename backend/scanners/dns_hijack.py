@@ -123,8 +123,8 @@ def _check_resolver_consistency(domain: str) -> tuple[dict[str, list[str]], DNSH
         remediation=(
             "Compare your DNS registrar's published records against what each resolver "
             "returns. If you made no recent DNS changes, contact your registrar and DNS "
-            "provider immediately to investigate unauthorised modifications. Enable DNSSEC "
-            "DNSSEC signs your records so any tampering becomes detectable."
+            "provider immediately to investigate unauthorized modifications. Enable DNSSEC "
+            "so any future tampering becomes detectable."
         ),
         penalty=PENALTY["high"],
     )
