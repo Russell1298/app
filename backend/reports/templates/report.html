@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Security Assessment — {{ result.domain }}</title>
+<title>Security Assessment: {{ result.domain }}</title>
 <style>
   /* ── Reset & base ─────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -476,7 +476,7 @@
 </head>
 <body>
 
-<button class="print-btn no-print" onclick="window.print()">⬇ Save as PDF</button>
+<button class="print-btn no-print" onclick="window.print()">Save as PDF</button>
 
 <div class="report-wrap">
 
@@ -486,8 +486,8 @@
 <div class="cover">
 
   <div class="cover-logo">
-    <span class="cover-logo-icon">🛡</span>
-    SiteGuard
+    <span class="cover-logo-icon" style="color:#0f2d5a;font-weight:800">S</span>
+    Sekura
   </div>
 
   <div class="cover-label">Website Security Assessment</div>
@@ -498,9 +498,9 @@
   <div class="cover-risk-row">
     <div class="cover-score-block">
       <div class="cover-score-num" style="color:{{ ring_color }}">
-        {{ result.overall_risk_score }}<span class="cover-score-sub">/100</span>
+        {{ security_score }}<span class="cover-score-sub">/100</span>
       </div>
-      <div class="cover-score-caption">Overall Risk Score</div>
+      <div class="cover-score-caption">Security Score</div>
     </div>
     <div class="cover-divider"></div>
     <div>
@@ -545,7 +545,7 @@
     <div class="exec-grid">
       <!-- Score ring -->
       <div class="score-circle">
-        {% set score = result.overall_risk_score %}
+        {% set score = security_score %}
         {% set r = 44 %}
         {% set circ = 2 * 3.14159 * r %}
         {% set offset = circ - (score / 100) * circ %}
@@ -563,7 +563,7 @@
             {{ score }}<small>/100</small>
           </div>
         </div>
-        <div class="score-label">Overall Risk</div>
+        <div class="score-label">Security Score</div>
       </div>
 
       <!-- Summary text -->
@@ -582,7 +582,7 @@
 
     <!-- Score cards with /100 context -->
     <div class="score-cards">
-      {% for label, sc, level in scanner_scores %}
+      {% for label, sc, level, cnt in scanner_scores %}
       <div class="score-card">
         <div class="score-card-label">{{ label }}</div>
         <div class="score-card-value">{{ sc }}<span class="score-card-of"> /100</span></div>
@@ -610,18 +610,18 @@
           {% if row.worst %}
           <span class="severity-badge sev-{{ row.worst }}">{{ row.worst }}</span>
           {% else %}
-          <span class="icon-pass">✓ Clear</span>
+          <span class="icon-pass">None</span>
           {% endif %}
         </td>
         <td>
           {% if row.worst in ('high', 'critical') %}
-          <span class="icon-fail">⚑ Action required</span>
+          <span class="icon-fail">Action required</span>
           {% elif row.worst == 'medium' %}
-          <span class="icon-warn">⚠ Review recommended</span>
+          <span class="icon-warn">Review recommended</span>
           {% elif row.worst == 'low' %}
-          <span class="icon-info">ℹ Minor issues</span>
+          <span class="icon-info">Minor issues</span>
           {% else %}
-          <span class="icon-pass">✓ No issues</span>
+          <span class="icon-pass">No issues</span>
           {% endif %}
         </td>
       </tr>
@@ -691,14 +691,22 @@
         <div class="method-card-title">Fingerprinting</div>
         <div class="method-card-body">Identifies server software, CMS, frameworks, and CDN from headers, cookies, and page content.</div>
       </div>
+      <div class="method-card">
+        <div class="method-card-title">Checkout Scripts</div>
+        <div class="method-card-body">Inventories third-party JavaScript loaded on the homepage and checkout pages and checks each script for integrity protection.</div>
+      </div>
+      <div class="method-card">
+        <div class="method-card-title">DNS Hijack Detection</div>
+        <div class="method-card-body">Compares answers from several public DNS resolvers to detect tampering, and checks whether DNSSEC protects the domain's records.</div>
+      </div>
     </div>
 
     <div class="section-title" style="margin-top:22px">Out of Scope</div>
     <div class="callout callout-warn">
-      This report does <strong>not</strong> include: authenticated scanning, brute-force attempts,
+      This report excludes: authenticated scanning, brute-force attempts,
       exploit testing, social engineering, physical security, internal network assessment,
-      or manual code review. Findings reflect publicly observable signals — not confirmed
-      exploitability. For a full penetration test, engage a certified security professional.
+      and manual code review. Findings reflect publicly observable signals; exploitability
+      was not confirmed. For a full penetration test, engage a certified security professional.
     </div>
   </div>
 
@@ -754,7 +762,6 @@
       {% for m in result.fingerprint.matches %}
       <span class="tech-pill">
         <span class="tech-category">{{ m.category }}</span>{{ m.name }}
-        {% if m.confidence == 'high' %} ✓{% endif %}
       </span>
       {% endfor %}
     </div>
@@ -768,9 +775,9 @@
     <!-- Confidence legend -->
     <div class="conf-legend">
       <strong>Confidence levels:</strong>
-      &nbsp;<span class="conf-badge conf-confirmed">Confirmed</span> — response body contains signatures of real sensitive content &nbsp;·&nbsp;
-      <span class="conf-badge conf-likely">Likely</span> — accessible path matches a known risk pattern &nbsp;·&nbsp;
-      <span class="conf-badge conf-possible">Possible</span> — endpoint exists; exploitability could not be verified
+      &nbsp;<span class="conf-badge conf-confirmed">Confirmed</span> response body contains signatures of sensitive content. &nbsp;
+      <span class="conf-badge conf-likely">Likely</span> accessible path matches a known risk pattern. &nbsp;
+      <span class="conf-badge conf-possible">Possible</span> endpoint exists; exploitability was not verified.
     </div>
 
     <table>
@@ -783,7 +790,7 @@
         <td>
           {% if f.confidence %}
           <span class="conf-badge conf-{{ f.confidence }}">{{ f.confidence | title }}</span>
-          {% else %}—{% endif %}
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
@@ -804,16 +811,16 @@
       <tr>
         <td class="mono">{{ s.subdomain }}</td>
         <td>
-          {% if s.resolves %}<span class="icon-pass">✓ Live</span>
-          {% else %}<span class="icon-info">— Not resolving</span>{% endif %}
+          {% if s.resolves %}<span class="icon-pass">Live</span>
+          {% else %}<span class="icon-info">Not resolving</span>{% endif %}
         </td>
-        <td class="mono" style="font-size:8.5pt;color:#64748b">{{ s.ip_addresses | join(', ') or '—' }}</td>
+        <td class="mono" style="font-size:8.5pt;color:#64748b">{{ s.ip_addresses | join(', ') }}</td>
       </tr>
       {% endfor %}
       {% if all_subdomains | length > 25 %}
       <tr>
         <td colspan="3" style="color:#94a3b8;font-size:8.5pt;text-align:center">
-          + {{ all_subdomains | length - 25 }} more — see Technical Appendix
+          + {{ all_subdomains | length - 25 }} more; see Technical Appendix
         </td>
       </tr>
       {% endif %}
@@ -835,7 +842,7 @@
 
   {% if high_findings %}
   <div class="section">
-    <div class="section-title">High Priority — Immediate Attention Required</div>
+    <div class="section-title">High Priority: Immediate Attention Required</div>
     <p style="color:#64748b;font-size:9.5pt;margin-bottom:18px">
       These issues represent the most significant risks. They should be addressed as a
       priority to protect customer data, maintain trust, and meet compliance requirements.
@@ -861,7 +868,7 @@
         <div class="finding-label" style="margin-top:10px">How to fix it</div>
         <div class="finding-fix">{{ f.remediation }}</div>
         {% endif %}
-        <span class="effort-badge">⏱ Estimated effort: {{ f.effort }}</span>
+        <span class="effort-badge">Estimated effort: {{ f.effort }}</span>
       </div>
     </div>
     {% endfor %}
@@ -870,7 +877,7 @@
 
   {% if medium_findings %}
   <div class="section {% if high_findings %}page-break{% endif %}">
-    <div class="section-title">Medium Priority — Address Within 30 Days</div>
+    <div class="section-title">Medium Priority: Address Within 30 Days</div>
     {% for f in medium_findings %}
     <div class="finding finding-{{ f.severity }}">
       <div class="finding-header">
@@ -892,7 +899,7 @@
         <div class="finding-label" style="margin-top:10px">How to fix it</div>
         <div class="finding-fix">{{ f.remediation }}</div>
         {% endif %}
-        <span class="effort-badge">⏱ {{ f.effort }}</span>
+        <span class="effort-badge">Estimated effort: {{ f.effort }}</span>
       </div>
     </div>
     {% endfor %}
@@ -920,7 +927,7 @@
 <div class="content page-break">
   <div class="page-heading">Security Findings</div>
   <p style="color:#16a34a;font-weight:600;padding:20px 0;font-size:11pt">
-    ✓ No security issues were detected in this assessment.
+    No security issues were detected in this assessment.
   </p>
 </div>
 {% endif %}
@@ -943,11 +950,11 @@
       <tr>
         <td class="mono">{{ f.header }}</td>
         <td>
-          {% if f.status == 'present' %}<span class="icon-pass">✓ Present</span>
-          {% elif f.status == 'missing' %}<span class="icon-fail">✗ Missing</span>
-          {% else %}<span class="icon-warn">⚠ Weak</span>{% endif %}
+          {% if f.status == 'present' %}<span class="icon-pass">Present</span>
+          {% elif f.status == 'missing' %}<span class="icon-fail">Missing</span>
+          {% else %}<span class="icon-warn">Weak</span>{% endif %}
         </td>
-        <td class="mono" style="font-size:8.5pt;color:#64748b">{{ f.value or '—' }}</td>
+        <td class="mono" style="font-size:8.5pt;color:#64748b">{{ f.value or '' }}</td>
       </tr>
       {% endfor %}
     </table>
@@ -989,10 +996,10 @@
       <tr>
         <td>{{ f.check }}</td>
         <td>
-          {% if f.status == 'pass' %}<span class="icon-pass">✓ Pass</span>
-          {% elif f.status == 'fail' %}<span class="icon-fail">✗ Fail</span>
-          {% elif f.status == 'warn' %}<span class="icon-warn">⚠ Warn</span>
-          {% else %}<span class="icon-info">ℹ Info</span>{% endif %}
+          {% if f.status == 'pass' %}<span class="icon-pass">Pass</span>
+          {% elif f.status == 'fail' %}<span class="icon-fail">Fail</span>
+          {% elif f.status == 'warn' %}<span class="icon-warn">Warn</span>
+          {% else %}<span class="icon-info">Info</span>{% endif %}
         </td>
         <td style="font-size:9pt;color:#475569">{{ f.description }}</td>
       </tr>
@@ -1012,8 +1019,8 @@
       <tr><td>Valid from</td><td class="mono">{{ cert.not_before }}</td></tr>
       <tr><td>Valid until</td><td class="mono">{{ cert.not_after }}</td></tr>
       <tr><td>Days remaining</td><td>{{ cert.days_until_expiry }}</td></tr>
-      <tr><td>Self-signed</td><td>{{ 'Yes ⚠' if cert.is_self_signed else 'No ✓' }}</td></tr>
-      <tr><td>Subject Alt Names</td><td class="mono">{{ cert.sans | join(', ') or '—' }}</td></tr>
+      <tr><td>Self-signed</td><td>{{ 'Yes' if cert.is_self_signed else 'No' }}</td></tr>
+      <tr><td>Subject Alt Names</td><td class="mono">{{ cert.sans | join(', ') }}</td></tr>
       <tr><td>Serial number</td><td class="mono">{{ cert.serial_number }}</td></tr>
     </table>
 
@@ -1026,11 +1033,11 @@
         <td>{{ 'Yes' if v.supported else ('No' if v.supported == false else 'Unknown') }}</td>
         <td>
           {% if v.version in ('TLS 1.0', 'TLS 1.1') %}
-            {% if v.supported %}<span class="icon-fail">⚠ Should be disabled</span>
-            {% else %}<span class="icon-pass">✓ Correctly disabled</span>{% endif %}
+            {% if v.supported %}<span class="icon-fail">Should be disabled</span>
+            {% else %}<span class="icon-pass">Correctly disabled</span>{% endif %}
           {% else %}
-            {% if v.supported %}<span class="icon-pass">✓ Good</span>
-            {% else %}<span class="icon-warn">⚠ Consider enabling</span>{% endif %}
+            {% if v.supported %}<span class="icon-pass">Supported</span>
+            {% else %}<span class="icon-warn">Consider enabling</span>{% endif %}
           {% endif %}
         </td>
       </tr>
@@ -1050,19 +1057,19 @@
         <td class="mono">{{ f.status_code }}</td>
         <td>
           {% if f.exposed and f.status_code == 200 and f.severity != 'info' %}
-          <span class="icon-fail">⚑ Flagged — {{ f.severity }}</span>
+          <span class="icon-fail">Flagged: {{ f.severity }}</span>
           {% elif f.exposed and f.status_code == 403 %}
           <span class="icon-warn">Blocked (403)</span>
           {% elif f.severity == 'info' %}
-          <span class="icon-info">ℹ Informational</span>
+          <span class="icon-info">Informational</span>
           {% else %}
-          <span class="icon-pass">✓ Not found</span>
+          <span class="icon-pass">Not found</span>
           {% endif %}
         </td>
         <td>
           {% if f.confidence %}
           <span class="conf-badge conf-{{ f.confidence }}">{{ f.confidence | title }}</span>
-          {% else %}—{% endif %}
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
@@ -1094,6 +1101,51 @@
   </div>
   {% endif %}
 
+  <!-- Checkout script inventory -->
+  {% if result.checkout_scripts %}
+  <div class="section">
+    <h3>Checkout Script Checks</h3>
+    {% if result.checkout_scripts.findings %}
+    <table>
+      <tr><th>Finding</th><th>Severity</th><th>Evidence</th></tr>
+      {% for f in result.checkout_scripts.findings %}
+      <tr>
+        <td>{{ f.finding_id.replace('_', ' ') | capitalize }}</td>
+        <td><span class="severity-badge sev-{{ f.severity }}">{{ f.severity | upper }}</span></td>
+        <td class="mono" style="font-size:8.5pt;color:#64748b">{{ f.evidence }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p style="font-size:9.5pt;color:#475569;margin-bottom:16px">
+      {{ result.checkout_scripts.pages_scanned | length }} page(s) scanned. No payment script issues were found.
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- DNS hijack checks -->
+  {% if result.dns_hijack %}
+  <div class="section">
+    <h3>DNS Hijack Checks</h3>
+    <table>
+      <tr><th>Check</th><th>Status</th><th>Notes</th></tr>
+      {% for f in result.dns_hijack.findings %}
+      <tr>
+        <td>{{ f.check }}</td>
+        <td>
+          {% if f.status == 'pass' %}<span class="icon-pass">Pass</span>
+          {% elif f.status == 'fail' %}<span class="icon-fail">Fail</span>
+          {% elif f.status == 'warn' %}<span class="icon-warn">Warn</span>
+          {% else %}<span class="icon-info">Info</span>{% endif %}
+        </td>
+        <td style="font-size:9pt;color:#475569">{{ f.description }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
   <!-- Full subdomain list if truncated above -->
   {% if all_subdomains | length > 25 %}
   <div class="section">
@@ -1103,8 +1155,8 @@
       {% for s in all_subdomains %}
       <tr>
         <td class="mono">{{ s.subdomain }}</td>
-        <td>{% if s.resolves %}<span class="icon-pass">✓</span>{% else %}<span class="icon-info">—</span>{% endif %}</td>
-        <td class="mono" style="font-size:8.5pt;color:#64748b">{{ s.ip_addresses | join(', ') or '—' }}</td>
+        <td>{% if s.resolves %}<span class="icon-pass">Live</span>{% else %}<span class="icon-info">Not resolving</span>{% endif %}</td>
+        <td class="mono" style="font-size:8.5pt;color:#64748b">{{ s.ip_addresses | join(', ') }}</td>
       </tr>
       {% endfor %}
     </table>
@@ -1120,37 +1172,22 @@
 <div class="content page-break">
 
   <div class="page-heading">Scanner Breakdown</div>
-  <div class="page-subheading">Per-scanner risk score and failing finding count</div>
+  <div class="page-subheading">Per-scanner security score and finding count</div>
 
   <div class="section">
     <table>
       <tr>
         <th>Scanner</th>
-        <th>Risk Score</th>
+        <th>Score</th>
         <th>Risk Level</th>
-        <th>Failing Findings</th>
+        <th>Findings</th>
       </tr>
-      {% for label, sc, level in scanner_scores %}
-      {% set scanner_key = label | lower | replace(' / ', '_') | replace(' & ', '_') | replace(' ', '_') %}
+      {% for label, sc, level, cnt in scanner_scores %}
       <tr>
         <td><strong>{{ label }}</strong></td>
         <td class="mono">{{ sc }} / 100</td>
         <td><span class="score-card-badge badge-sm-{{ level }}">{{ level | upper }}</span></td>
-        <td>
-          {% if label == 'Security Headers' %}
-            {{ result.headers.summary.get('missing', 0) + result.headers.summary.get('weak', 0) }}
-          {% elif label == 'DNS &amp; Email' or label == 'DNS & Email' %}
-            {{ result.dns.summary.get('fail', 0) }}
-          {% elif label == 'SSL / TLS' %}
-            {{ result.ssl.summary.get('fail', 0) }}
-          {% elif label == 'Exposure' %}
-            {{ result.exposure.summary.get('exposed', 0) }}
-          {% elif label == 'Secrets' %}
-            {{ result.secrets.findings | length if result.secrets else 0 }}
-          {% else %}
-            —
-          {% endif %}
-        </td>
+        <td>{{ cnt }}</td>
       </tr>
       {% endfor %}
     </table>
@@ -1170,7 +1207,7 @@
   {% if roadmap.immediate %}
   <div class="roadmap-phase">
     <div class="roadmap-phase-header phase-immediate">
-      🚨 Immediate — Within 7 days
+      Immediate: within 7 days
     </div>
     <div class="roadmap-phase-body">
       {% for item in roadmap.immediate %}
@@ -1189,7 +1226,7 @@
   {% if roadmap.short_term %}
   <div class="roadmap-phase">
     <div class="roadmap-phase-header phase-short">
-      ⚠ Short-term — Within 30 days
+      Short-term: within 30 days
     </div>
     <div class="roadmap-phase-body">
       {% for item in roadmap.short_term %}
@@ -1208,7 +1245,7 @@
   {% if roadmap.ongoing %}
   <div class="roadmap-phase">
     <div class="roadmap-phase-header phase-ongoing">
-      ✓ Ongoing — Within 90 days
+      Ongoing: within 90 days
     </div>
     <div class="roadmap-phase-body">
       {% for item in roadmap.ongoing %}
@@ -1226,7 +1263,7 @@
 
   {% if not roadmap.immediate and not roadmap.short_term and not roadmap.ongoing %}
   <p style="color:#16a34a;font-weight:600;padding:20px 0;font-size:11pt">
-    ✓ No remediation items identified. Continue regular monitoring.
+    No remediation items identified. Continue regular monitoring.
   </p>
   {% endif %}
 
@@ -1234,8 +1271,8 @@
 
 <!-- Minimal closing line — no separate page -->
 <div class="doc-footer">
-  <span>SiteGuard — Website Security Assessment · {{ result.domain }}</span>
-  <span>Generated {{ scan_date }} · Read-only assessment, no exploitation</span>
+  <span>Sekura Website Security Assessment: {{ result.domain }}</span>
+  <span>Generated {{ scan_date }}. Read-only assessment, no exploitation.</span>
   <span>This report reflects the publicly visible security posture at the time of scanning.</span>
 </div>
 

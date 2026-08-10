@@ -23,7 +23,7 @@ _BUSINESS_IMPACT: dict[str, str] = {
     "Content-Security-Policy": (
         "Your website has no content security rules. Attackers can inject malicious "
         "scripts into your pages to steal customer login credentials, payment data, or "
-        "hijack user sessions — a technique known as Cross-Site Scripting (XSS)."
+        "hijack user sessions. This technique is known as Cross-Site Scripting (XSS)."
     ),
     "Strict-Transport-Security": (
         "Visitors may be silently redirected to an unencrypted version of your site. "
@@ -32,7 +32,7 @@ _BUSINESS_IMPACT: dict[str, str] = {
     ),
     "X-Frame-Options": (
         "Your website can be embedded invisibly inside another page. Attackers use this "
-        "technique — called clickjacking — to trick your customers into clicking buttons "
+        "technique, called clickjacking, to trick your customers into clicking buttons "
         "they cannot see, such as authorising payments or changing account settings."
     ),
     "X-Content-Type-Options": (
@@ -42,7 +42,7 @@ _BUSINESS_IMPACT: dict[str, str] = {
     ),
     "Referrer-Policy": (
         "When a user clicks a link from your site to an external page, their browser may "
-        "send the full URL of the page they were on — potentially leaking internal paths, "
+        "send the full URL of the page they were on, which can leak internal paths, "
         "search terms, or session tokens to third parties."
     ),
     "Permissions-Policy": (
@@ -54,7 +54,7 @@ _BUSINESS_IMPACT: dict[str, str] = {
     "SPF": (
         "Anyone can send emails that appear to come from your domain. Criminals can "
         "impersonate your business to trick your customers into revealing passwords, "
-        "making fraudulent payments, or installing malware — directly damaging your brand."
+        "making fraudulent payments, or installing malware. This directly damages your brand."
     ),
     "DMARC": (
         "Your domain has no email fraud policy, so receiving mail servers have no "
@@ -97,7 +97,7 @@ _BUSINESS_IMPACT: dict[str, str] = {
     "Git directory": (
         "The .git directory on this site appears to be publicly accessible. If confirmed, "
         "an attacker may be able to retrieve your application's source code, full commit "
-        "history, and any credentials that were ever committed — even if later deleted."
+        "history, and any credentials that were ever committed, even if later deleted."
     ),
     ".env file": (
         "An environment configuration file appears to be accessible at a standard location. "
@@ -130,21 +130,21 @@ _BUSINESS_IMPACT: dict[str, str] = {
     ),
     # Secrets
     "Exposed credential": (
-        "A real API key, password, or access token was found in your website's publicly "
+        "An API key, password, or access token was found in your website's publicly "
         "visible code. Anyone who visits your site can copy it. Attackers use these "
         "credentials to access your cloud accounts, billing, databases, or third-party "
-        "services — often running up large bills or exfiltrating customer data."
+        "services, and often run up large bills or exfiltrate customer data."
     ),
     "AWS Access Key ID": (
         "An Amazon Web Services access key was found in your public code. This gives "
-        "anyone who finds it direct access to your AWS account — including storage, "
-        "compute, and potentially customer data — and may result in significant "
+        "anyone who finds it direct access to your AWS account, including storage, "
+        "compute, and potentially customer data, and may result in significant "
         "unexpected charges."
     ),
     "Stripe": (
         "A Stripe payment API key was found in your public code. This credential "
         "could be used to initiate fraudulent charges, access transaction history, "
-        "or refund payments — exposing you to direct financial loss."
+        "or refund payments, exposing you to direct financial loss."
     ),
     "GitHub": (
         "A GitHub access token was found in your public code. This may allow an "
@@ -171,45 +171,47 @@ _BUSINESS_IMPACT: dict[str, str] = {
 }
 
 _EFFORT: dict[str, str] = {
-    "Content-Security-Policy": "Medium — 2–8 hours (requires policy tuning)",
-    "Strict-Transport-Security": "Easy — 30 minutes",
-    "X-Frame-Options": "Easy — 15 minutes",
-    "X-Content-Type-Options": "Easy — 15 minutes",
-    "Referrer-Policy": "Easy — 15 minutes",
-    "Permissions-Policy": "Easy — 30 minutes",
-    "SPF": "Easy — 30 minutes (DNS change)",
-    "DMARC": "Easy — 30 minutes (DNS change)",
-    "CAA": "Easy — 15 minutes (DNS change)",
-    "DNSSEC": "Medium — 1–2 hours (registrar configuration)",
-    "Self-signed certificate": "Easy — 1 hour (Let's Encrypt/Certbot)",
-    "Certificate expiry": "Easy — 30 minutes (certificate renewal)",
-    "TLS 1.0": "Easy — 30 minutes (server config change)",
-    "TLS 1.1": "Easy — 30 minutes (server config change)",
-    "Exposed .git directory": "Easy — 30 minutes (web server config)",
-    "Exposed .env file": "Easy — 30 minutes (web server config)",
-    "phpMyAdmin exposed": "Medium — 1–2 hours (restrict or remove)",
-    "WordPress admin exposed": "Medium — 1–2 hours (IP restriction or 2FA)",
-    "Open directory listing": "Easy — 15 minutes (server config)",
-    "Symfony profiler exposed": "Easy — 15 minutes (disable in production config)",
-    "Laravel Telescope exposed": "Easy — 15 minutes (environment variable)",
-    "AWS Access Key": "Immediate — revoke key in AWS console, then remove from code",
-    "Stripe": "Immediate — roll key in Stripe dashboard, then remove from code",
-    "GitHub": "Immediate — revoke token in GitHub settings, then remove from code",
-    "Private Key": "Immediate — generate new key pair, revoke old certificate",
-    "Hardcoded Password": "Immediate — change the password, move to environment variable",
-    "API Key": "Immediate — rotate the key with the issuing service, then remove from code",
-    "Database Connection String": "Immediate — change DB credentials, remove from code",
-    "MongoDB Connection String": "Immediate — change DB credentials, remove from code",
-    "Google API Key": "Immediate — restrict or rotate key in Google Cloud Console",
+    "Content-Security-Policy": "2 to 8 hours; requires policy tuning",
+    "Strict-Transport-Security": "About 30 minutes",
+    "X-Frame-Options": "About 15 minutes",
+    "X-Content-Type-Options": "About 15 minutes",
+    "Referrer-Policy": "About 15 minutes",
+    "Permissions-Policy": "About 30 minutes",
+    "SPF": "About 30 minutes (DNS change)",
+    "DMARC": "About 30 minutes (DNS change)",
+    "CAA": "About 15 minutes (DNS change)",
+    "DNSSEC": "1 to 2 hours (registrar configuration)",
+    "Self-signed certificate": "About 1 hour (Let's Encrypt or Certbot)",
+    "Certificate expiry": "About 30 minutes (certificate renewal)",
+    "TLS 1.0": "About 30 minutes (server config change)",
+    "TLS 1.1": "About 30 minutes (server config change)",
+    "Exposed .git directory": "About 30 minutes (web server config)",
+    "Exposed .env file": "About 30 minutes (web server config)",
+    "phpMyAdmin exposed": "1 to 2 hours (restrict or remove)",
+    "WordPress admin exposed": "1 to 2 hours (IP restriction or 2FA)",
+    "Open directory listing": "About 15 minutes (server config)",
+    "Symfony profiler exposed": "About 15 minutes (disable in production config)",
+    "Laravel Telescope exposed": "About 15 minutes (environment variable)",
+    "AWS Access Key": "Immediate: revoke the key in the AWS console, then remove it from code",
+    "Stripe": "Immediate: roll the key in the Stripe dashboard, then remove it from code",
+    "GitHub": "Immediate: revoke the token in GitHub settings, then remove it from code",
+    "Private Key": "Immediate: generate a new key pair and revoke the old certificate",
+    "Hardcoded Password": "Immediate: change the password and move it to an environment variable",
+    "API Key": "Immediate: rotate the key with the issuing service, then remove it from code",
+    "Database Connection String": "Immediate: change the database credentials and remove them from code",
+    "MongoDB Connection String": "Immediate: change the database credentials and remove them from code",
+    "Google API Key": "Immediate: restrict or rotate the key in Google Cloud Console",
 }
 
 _SCANNER_LABEL: dict[str, str] = {
-    "headers":     "Security Headers",
-    "dns":         "DNS & Email",
-    "ssl":         "SSL / TLS",
-    "exposure":    "Public Exposure",
-    "fingerprint": "Fingerprint",
-    "secrets":     "Secret Exposure",
+    "headers":          "Security Headers",
+    "dns":              "DNS & Email",
+    "ssl":              "SSL / TLS",
+    "exposure":         "Public Exposure",
+    "fingerprint":      "Fingerprint",
+    "secrets":          "Secret Exposure",
+    "checkout_scripts": "Checkout Scripts",
+    "dns_hijack":       "DNS Hijack Detection",
 }
 
 
@@ -228,7 +230,7 @@ def _effort(title: str) -> str:
     for key, effort in _EFFORT.items():
         if key.lower() in title.lower():
             return effort
-    return "Medium — consult your development team"
+    return "Varies; consult your development team"
 
 
 def _collect_all_findings(result: FullScanResult) -> list[dict]:
@@ -298,6 +300,27 @@ def _collect_all_findings(result: FullScanResult) -> list[dict]:
                     "with the issuing service. Use environment variables for secrets."
                 ),
             })
+
+    if result.checkout_scripts:
+        for f in result.checkout_scripts.findings:
+            findings.append({
+                "title": f.finding_id.replace("_", " ").capitalize(),
+                "scanner": "checkout_scripts",
+                "severity": f.severity,
+                "description": f.description,
+                "remediation": f.remediation or "",
+            })
+
+    if result.dns_hijack:
+        for f in result.dns_hijack.findings:
+            if f.status in ("fail", "warn") and f.severity:
+                findings.append({
+                    "title": f.check,
+                    "scanner": "dns_hijack",
+                    "severity": f.severity,
+                    "description": f.description,
+                    "remediation": f.remediation or "",
+                })
 
     for f in findings:
         f["business_impact"] = _business_impact(f["title"], f["description"])
@@ -386,6 +409,18 @@ def _glance_rows(result: FullScanResult, findings: list[dict]) -> list[dict]:
             "count": len(result.secrets.findings),
             "worst": worst("secrets") or result.secrets.risk_level if result.secrets.risk_level != "low" else worst("secrets"),
         })
+    if result.checkout_scripts:
+        rows.append({
+            "category": "Checkout Scripts",
+            "count": len(result.checkout_scripts.findings),
+            "worst": worst("checkout_scripts"),
+        })
+    if result.dns_hijack:
+        rows.append({
+            "category": "DNS Hijack Detection",
+            "count": sum(1 for f in result.dns_hijack.findings if f.status in ("fail", "warn")),
+            "worst": worst("dns_hijack"),
+        })
     return rows
 
 
@@ -412,14 +447,24 @@ def generate_html(
 ) -> str:
     all_findings = _collect_all_findings(result)
 
+    # Present SECURITY scores (100 = clean), matching the dashboard. Scanners
+    # store risk scores internally; the report must show the same number the
+    # client saw on screen.
+    def _fail_count(scanner: str) -> int:
+        return sum(1 for f in all_findings if f["scanner"] == scanner)
+
     scanner_scores = [
-        ("Security Headers", result.headers.risk_score, result.headers.risk_level),
-        ("DNS & Email",      result.dns.risk_score,     result.dns.risk_level),
-        ("SSL / TLS",        result.ssl.risk_score,     result.ssl.risk_level),
-        ("Exposure",         result.exposure.risk_score, result.exposure.risk_level),
+        ("Security Headers", 100 - result.headers.risk_score,  result.headers.risk_level,  _fail_count("headers")),
+        ("DNS & Email",      100 - result.dns.risk_score,      result.dns.risk_level,      _fail_count("dns")),
+        ("SSL / TLS",        100 - result.ssl.risk_score,      result.ssl.risk_level,      _fail_count("ssl")),
+        ("Exposure",         100 - result.exposure.risk_score, result.exposure.risk_level, _fail_count("exposure")),
     ]
     if result.secrets:
-        scanner_scores.append(("Secrets", result.secrets.risk_score, result.secrets.risk_level))
+        scanner_scores.append(("Secrets", 100 - result.secrets.risk_score, result.secrets.risk_level, _fail_count("secrets")))
+    if result.checkout_scripts:
+        scanner_scores.append(("Checkout Scripts", 100 - result.checkout_scripts.risk_score, result.checkout_scripts.risk_level, _fail_count("checkout_scripts")))
+    if result.dns_hijack:
+        scanner_scores.append(("DNS Hijack", 100 - result.dns_hijack.risk_score, result.dns_hijack.risk_level, _fail_count("dns_hijack")))
 
     # Live subdomains for the attack surface section
     live_subdomains = []
@@ -428,6 +473,7 @@ def generate_html(
 
     context = {
         "result":             result,
+        "security_score":     max(0, 100 - result.overall_risk_score),
         "client_name":        client_name,
         "scan_date":          datetime.now(timezone.utc).strftime("%d %B %Y"),
         "executive_summary":  _executive_summary(result, all_findings),

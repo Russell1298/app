@@ -157,9 +157,9 @@ def _top_findings(
                     ),
                     "remediation": (
                         "Remove this credential from your website's code right away, then "
-                        "change it (rotate it) with the service it belongs to — assume it's "
+                        "change it (rotate it) with the service it belongs to; assume it has "
                         "already been seen. Keep secrets in server-side environment variables, "
-                        "never in code that ships to the browser."
+                        "out of any code that ships to the browser."
                     ),
                     "evidence": f"URL: {f.source_url}\nLocation: {f.location}\nPreview: {f.match_preview}",
                 })
