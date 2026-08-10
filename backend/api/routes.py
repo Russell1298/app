@@ -16,8 +16,9 @@ from scanners.exposure import scan_exposure
 from scanners.fingerprint import scan_fingerprint
 from services.scan_orchestrator import run_full_scan
 from reports.html_report import generate_html, generate_pdf
+from models.lead import LeadRequest, LeadResponse, LeadItem
 from db.session import get_db
-from db.models import ScanJob
+from db.models import ScanJob, Lead
 from auth.deps import get_optional_user_id, require_user_id, get_is_owner
 from api.livefeed_router import limiter
 from netguard import assert_public_host_async, UnsafeTargetError
@@ -298,6 +299,81 @@ async def download_pdf_report(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Leads
+# ---------------------------------------------------------------------------
+
+@router.post("/leads", response_model=LeadResponse, status_code=201)
+@limiter.limit("5/minute")
+async def create_lead(
+    request: Request,
+    body: LeadRequest,
+    db: AsyncSession | None = Depends(get_db),
+) -> LeadResponse:
+    """
+    Capture someone who ran a scan and wants us to follow up.
+
+    Deliberately unauthenticated: the whole point is to reach people before
+    they make an account. Rate limited per IP, and every field is bounded by
+    the request model.
+    """
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    scan_uuid: uuid.UUID | None = None
+    if body.scan_id:
+        try:
+            scan_uuid = uuid.UUID(body.scan_id)
+        except ValueError:
+            scan_uuid = None
+
+    lead = Lead(
+        email=body.email,
+        domain=body.domain.lower() if body.domain else None,
+        scan_id=scan_uuid,
+        security_score=body.security_score,
+        urgent_findings=body.urgent_findings,
+        message=body.message,
+        source=body.source,
+        ip_address=_get_client_ip(request),
+    )
+    db.add(lead)
+    await db.commit()
+    return LeadResponse()
+
+
+@router.get("/leads", response_model=list[LeadItem])
+async def list_leads(
+    limit: int = Query(default=100, le=500),
+    db: AsyncSession | None = Depends(get_db),
+    is_owner: bool = Depends(get_is_owner),
+) -> list[LeadItem]:
+    """Owner-only inbox of captured leads, newest first."""
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    rows = await db.execute(
+        select(Lead).order_by(desc(Lead.created_at)).limit(limit)
+    )
+    return [
+        LeadItem(
+            id=str(l.id),
+            email=l.email,
+            domain=l.domain,
+            scan_id=str(l.scan_id) if l.scan_id else None,
+            security_score=l.security_score,
+            urgent_findings=l.urgent_findings,
+            message=l.message,
+            source=l.source,
+            contacted=l.contacted,
+            created_at=l.created_at.isoformat(),
+        )
+        for l in rows.scalars().all()
+    ]
 
 
 # ---------------------------------------------------------------------------
