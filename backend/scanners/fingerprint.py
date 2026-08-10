@@ -16,6 +16,7 @@ Detects:
 import re
 import httpx
 from models.scan import FingerprintMatch, FingerprintScanResult, utc_now_iso
+from scanners import SCAN_HEADERS
 
 _TIMEOUT = 10
 _HEADERS = dict(SCAN_HEADERS)
