@@ -30,6 +30,21 @@ _SUSPICIOUS_PATTERNS: list[tuple[str, str]] = [
 
 _IP_SRC_RE = re.compile(r"^https?://(\d{1,3}\.){3}\d{1,3}[:/]?")
 
+# Providers that document SRI as unsupported. Stripe requires stripe.js to be
+# loaded directly from its CDN for PCI DSS compliance and Radar fraud detection,
+# and updates the file frequently, so a pinned hash is not possible. Telling a
+# merchant to "add integrity=" on these is advice they cannot act on, so the
+# finding is reported without the high penalty and with remediation that works.
+_SRI_UNSUPPORTED_HOSTS = (
+    "js.stripe.com",
+    "checkout.stripe.com",
+)
+
+
+def _sri_unsupported(src: str) -> bool:
+    low = src.lower()
+    return any(h in low for h in _SRI_UNSUPPORTED_HOSTS)
+
 
 class _ScriptTagParser(HTMLParser):
     """Extract all <script> attributes and inline content from HTML."""
@@ -190,7 +205,30 @@ def _build_findings(
                 and domain.lower() not in src.lower()
             ):
                 reported_no_sri.add(src)
-                findings.append(CheckoutScriptFinding(
+                if _sri_unsupported(src):
+                    findings.append(CheckoutScriptFinding(
+                        finding_id="sri_unsupported_payment_script",
+                        severity="low",
+                        description=(
+                            f"A payment provider script on a checkout page has no Subresource "
+                            f"Integrity (SRI) attribute: {src}. This provider does not support "
+                            "SRI. The script must be loaded directly from their CDN to keep PCI "
+                            "DSS compliance and live fraud detection working, and it changes too "
+                            "often for a pinned hash. The residual risk is real and accepted "
+                            "across the industry."
+                        ),
+                        remediation=(
+                            "Leave the script as it is. Adding an integrity attribute would break "
+                            "payments. Reduce the risk another way: set a Content-Security-Policy "
+                            "that limits script-src to the exact payment domains you use, and keep "
+                            "a written inventory of every script on your checkout pages, which PCI "
+                            "DSS 6.4.3 requires."
+                        ),
+                        evidence=f"Page: {page_url}\nScript src: {src}\nSRI: not supported by provider",
+                        penalty=PENALTY["low"],
+                    ))
+                else:
+                  findings.append(CheckoutScriptFinding(
                     finding_id="no_sri_on_checkout_script",
                     severity="high",
                     description=(
