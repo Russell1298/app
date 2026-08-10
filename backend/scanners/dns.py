@@ -1,8 +1,8 @@
 """
 DNS and email authentication scanner.
 
-Performs passive DNS lookups only. DNSSEC is reported as informational only
-(not penalised) per v2 spec.
+Performs passive DNS lookups only. DNSSEC is handled by the dns_hijack
+scanner, not here, so a single check produces a single finding.
 """
 
 import asyncio
@@ -274,26 +274,6 @@ def _check_caa(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
     )
 
 
-def _check_dnssec(domain: str) -> DNSFinding:
-    """Informational only in v2 — not penalised."""
-    ds_values = _query(domain, "DS")
-    if ds_values:
-        return DNSFinding(check="DNSSEC", status="pass", severity=None,
-                         description="DNSSEC DS record found. DNS responses are signed.",
-                         remediation=None, penalty=0)
-    dnskey_values = _query(domain, "DNSKEY")
-    if dnskey_values:
-        return DNSFinding(check="DNSSEC", status="pass", severity=None,
-                         description="DNSSEC DNSKEY record found. DNS responses are signed.",
-                         remediation=None, penalty=0)
-    return DNSFinding(
-        check="DNSSEC", status="info", severity=None,
-        description="DNSSEC is not configured. Reported for information only, with no effect on your score.",
-        remediation="DNSSEC adds tamper-proofing to your DNS so visitors can't be silently redirected. Many registrars (and Cloudflare) let you turn it on with one click in the domain's settings. Optional, but a nice extra layer.",
-        penalty=0,
-    )
-
-
 def _cname_targets(domain: str) -> list[str]:
     """Return CNAME record values for *domain* (empty list if none)."""
     try:
@@ -383,13 +363,12 @@ async def scan_dns(domain: str, subdomains: list[str] | None = None) -> DNSScanR
         spf_finding = _check_spf(domain)
         dmarc_record, dmarc_finding = _check_dmarc(domain)
         caa_record, caa_finding = _check_caa(domain)
-        dnssec_finding = _check_dnssec(domain)
         takeover_findings = _check_subdomain_takeovers(subdomains or [])
         return (
             a_record, a_finding, mx_record, mx_finding,
             ns_record, ns_finding, txt_record,
             spf_finding, dmarc_record, dmarc_finding,
-            caa_record, caa_finding, dnssec_finding,
+            caa_record, caa_finding,
             takeover_findings,
         )
 
@@ -397,12 +376,15 @@ async def scan_dns(domain: str, subdomains: list[str] | None = None) -> DNSScanR
         a_record, a_finding, mx_record, mx_finding,
         ns_record, ns_finding, txt_record,
         spf_finding, dmarc_record, dmarc_finding,
-        caa_record, caa_finding, dnssec_finding,
+        caa_record, caa_finding,
         takeover_findings,
     ) = await loop.run_in_executor(None, _run_all)
 
     records = [r for r in [a_record, mx_record, ns_record, txt_record, dmarc_record, caa_record] if r]
-    findings = [a_finding, mx_finding, ns_finding, spf_finding, dmarc_finding, caa_finding, dnssec_finding]
+    # DNSSEC is reported by the dns_hijack scanner, which is where an unsigned
+    # zone actually matters. Checking it here too produced two findings for one
+    # check, with contradictory verdicts.
+    findings = [a_finding, mx_finding, ns_finding, spf_finding, dmarc_finding, caa_finding]
     findings.extend(takeover_findings)
 
     critical_triggers: list[str] = []
