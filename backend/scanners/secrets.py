@@ -11,12 +11,13 @@ import httpx
 import asyncio
 from urllib.parse import urljoin, urlparse
 from models.scan import SecretFinding, SecretScanResult, utc_now_iso
+from scanners import SCAN_HEADERS
 from scoring_config import PENALTY, scanner_score, risk_level
 
 _TIMEOUT   = 8
 _MAX_JS    = 5
 _MAX_BYTES = 500_000
-_HEADERS   = {"User-Agent": "SecurityScanner/1.0 (defensive assessment)"}
+_HEADERS   = dict(SCAN_HEADERS)
 
 _PATTERNS: list[tuple[str, str, str]] = [
     (r"AKIA[0-9A-Z]{16}",                                          "AWS Access Key ID",            "high"),

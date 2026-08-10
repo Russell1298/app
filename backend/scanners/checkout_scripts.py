@@ -16,6 +16,7 @@ from models.scan import (
     ScriptEntry, CheckoutScriptFinding, CheckoutScriptScanResult, utc_now_iso
 )
 from scoring_config import PENALTY, scanner_score, risk_level
+from scanners import USER_AGENT
 
 _CHECKOUT_PATHS = ["/cart", "/checkout", "/shop/cart", "/bag"]
 
@@ -106,10 +107,7 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str | None:
             timeout=10,
             follow_redirects=True,
             headers={
-                "User-Agent": (
-                    "SiteGuard-Scanner/1.0 (passive security assessment; "
-                    "contact: security@siteguard.app)"
-                )
+                "User-Agent": USER_AGENT
             },
         )
         ct = resp.headers.get("content-type", "")

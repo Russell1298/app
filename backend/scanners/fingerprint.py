@@ -18,7 +18,7 @@ import httpx
 from models.scan import FingerprintMatch, FingerprintScanResult, utc_now_iso
 
 _TIMEOUT = 10
-_HEADERS = {"User-Agent": "SecurityScanner/1.0 (defensive assessment)"}
+_HEADERS = dict(SCAN_HEADERS)
 
 # ---------------------------------------------------------------------------
 # Detection rules

@@ -18,10 +18,11 @@ import httpx
 import asyncio
 from collections import defaultdict
 from models.scan import ExposureFinding, ExposureScanResult, utc_now_iso
+from scanners import SCAN_HEADERS
 from scoring_config import PENALTY, scanner_score, risk_level
 
 _TIMEOUT = 8
-_HEADERS = {"User-Agent": "SecurityScanner/1.0 (defensive assessment)"}
+_HEADERS = dict(SCAN_HEADERS)
 
 _PROBES: list[dict] = [
     {

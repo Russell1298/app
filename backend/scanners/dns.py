@@ -11,6 +11,7 @@ import dns.resolver
 import dns.exception
 import dns.rdatatype
 from models.scan import DNSRecord, DNSFinding, DNSScanResult, utc_now_iso
+from scanners import SCAN_HEADERS
 from scoring_config import PENALTY, scanner_score, risk_level
 
 # Cloud service patterns that indicate a potentially dangling CNAME target.
@@ -297,7 +298,7 @@ def _cname_responds(target: str) -> bool:
         url = f"{scheme}://{target}/"
         try:
             resp = httpx.get(url, timeout=6, follow_redirects=True,
-                             headers={"User-Agent": "SecurityScanner/1.0 (defensive assessment)"})
+                             headers=dict(SCAN_HEADERS))
             if resp.status_code == 200:
                 return True
         except Exception:

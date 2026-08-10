@@ -8,6 +8,7 @@ absence, and quality of security-relevant headers.
 import re
 import httpx
 from models.scan import HeaderFinding, InformationLeakFinding, HeaderScanResult, utc_now_iso
+from scanners import SCAN_HEADERS
 from scoring_config import PENALTY, scanner_score, risk_level
 
 _HSTS_MIN_AGE = 15_552_000  # 180 days per v2 spec
@@ -303,7 +304,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
         async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=10.0,
-            headers={"User-Agent": "SecurityHeaderScanner/1.0 (defensive assessment)"},
+            headers=dict(SCAN_HEADERS),
         ) as client:
             response = await client.get(url)
             headers_received = dict(response.headers)
@@ -316,7 +317,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
             async with httpx.AsyncClient(
                 follow_redirects=True,
                 timeout=10.0,
-                headers={"User-Agent": "SecurityHeaderScanner/1.0 (defensive assessment)"},
+                headers=dict(SCAN_HEADERS),
             ) as client:
                 response = await client.get(url)
                 headers_received = dict(response.headers)
