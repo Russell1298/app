@@ -267,33 +267,14 @@ async def _load_scan(scan_id: str, db: AsyncSession | None, user_id: str | None 
     return result
 
 
-def _require_report_access(result: FullScanResult, is_owner: bool) -> None:
-    """
-    The rendered report is the paid audit deliverable.
-
-    Everything the scan found stays free to read in the browser, but the
-    document does not. Anonymous scans carry no user_id, so _load_scan alone
-    lets anyone holding a scan_id fetch the report — and the scan_id is handed
-    to every visitor in the scan response.
-    """
-    if is_owner or result.paid:
-        return
-    raise HTTPException(
-        status_code=402,
-        detail="The written report is part of a paid audit.",
-    )
-
-
 @router.get("/scans/{scan_id}/report", response_class=HTMLResponse)
 async def download_html_report(
     scan_id: str,
     client_name: str = Query(default="", description="Client or company name for the cover page"),
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
-    is_owner: bool = Depends(get_is_owner),
 ) -> HTMLResponse:
     result = await _load_scan(scan_id, db, user_id)
-    _require_report_access(result, is_owner)
     html = generate_html(result, client_name=client_name)
     filename = f"security-report-{result.domain}.html"
     return HTMLResponse(
@@ -303,15 +284,19 @@ async def download_html_report(
 
 
 @router.get("/scans/{scan_id}/report.pdf")
+@limiter.limit("20/minute")
 async def download_pdf_report(
+    request: Request,
     scan_id: str,
     client_name: str = Query(default="", description="Client or company name for the cover page"),
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
-    is_owner: bool = Depends(get_is_owner),
 ) -> Response:
+    # The report is free to everyone — it is the best demonstration of the work
+    # we do, so it is a marketing asset rather than something to gate. The rate
+    # limit is only an abuse guard: rendering a PDF is CPU-heavy, so this is the
+    # most expensive endpoint to hammer. It is not a usage quota.
     result = await _load_scan(scan_id, db, user_id)
-    _require_report_access(result, is_owner)
     loop = asyncio.get_running_loop()
     pdf_bytes = await loop.run_in_executor(None, generate_pdf, result, client_name)
     filename = f"security-report-{result.domain}.pdf"
