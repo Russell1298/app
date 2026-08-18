@@ -164,6 +164,29 @@ _BONUS_HEADERS = (
 
 _VERSION_RE = re.compile(r'\d')
 
+# CSP can be delivered via an HTML meta tag instead of a response header — the
+# spec explicitly allows it. A scanner that only reads headers reports a false
+# "CSP is missing" on any site that does this. The tag itself cannot carry
+# frame-ancestors, report-uri/report-to, or sandbox (browsers ignore those
+# directives in a meta tag), so it does not satisfy the frame-ancestors check
+# elsewhere in this file — only the "is there a CSP at all" check.
+# Uses a backreference (\1, \4) so the value is matched up to the SAME quote
+# character that opened it — not "any quote character". A naive
+# [^"\']+ character class breaks the instant a CSP value contains 'self' or
+# 'unsafe-inline' inside double quotes, silently truncating the match.
+_META_CSP_RE = re.compile(
+    r'<meta\s+[^>]*http-equiv=(["\'])content-security-policy\1[^>]*content=(["\'])(.*?)\2'
+    r'|<meta\s+[^>]*content=(["\'])(.*?)\4[^>]*http-equiv=(["\'])content-security-policy\6',
+    re.IGNORECASE,
+)
+
+
+def _extract_meta_csp(html: str) -> str | None:
+    m = _META_CSP_RE.search(html[:200_000])  # meta tags live in <head>; cap for safety
+    if not m:
+        return None
+    return (m.group(3) or m.group(5) or "").strip()
+
 
 def _check_hsts_value(value: str) -> HeaderFinding | None:
     lower = value.lower()
@@ -299,6 +322,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
     redirect_history: list[httpx.Response] = []
     fetch_error: str | None = None
     scanned_url = url
+    body_text = ""
 
     try:
         async with httpx.AsyncClient(
@@ -311,6 +335,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
             set_cookie_lines = response.headers.get_list("set-cookie")
             scanned_url = str(response.url)
             redirect_history = list(response.history)
+            body_text = response.text
     except httpx.ConnectError:
         try:
             url = f"http://{domain}"
@@ -323,6 +348,7 @@ async def scan_headers(domain: str) -> HeaderScanResult:
                 headers_received = dict(response.headers)
                 scanned_url = str(response.url)
                 redirect_history = list(response.history)
+                body_text = response.text
         except httpx.RequestError as e:
             fetch_error = str(e)
             scanned_url = url
@@ -358,6 +384,9 @@ async def scan_headers(domain: str) -> HeaderScanResult:
     csp_value = lower_headers.get("content-security-policy", "")
     csp_ro_value = lower_headers.get("content-security-policy-report-only", "")
     has_frame_ancestors = "frame-ancestors" in csp_value or "frame-ancestors" in csp_ro_value
+    # frame-ancestors is spec-disallowed inside a meta tag, so this deliberately
+    # does not feed into has_frame_ancestors above.
+    csp_meta_value = _extract_meta_csp(body_text) if not csp_value else None
 
     findings: list[HeaderFinding] = []
     information_leaks: list[InformationLeakFinding] = []
@@ -368,7 +397,26 @@ async def scan_headers(domain: str) -> HeaderScanResult:
         value = lower_headers.get(key)
 
         if value is None:
-            if key == "content-security-policy" and csp_ro_value:
+            if key == "content-security-policy" and csp_meta_value:
+                findings.append(HeaderFinding(
+                    header=spec["display"],
+                    status="present",
+                    severity=spec["severity"],
+                    value=f"(via <meta> tag) {csp_meta_value}",
+                    description=(
+                        "Content-Security-Policy is set via an HTML meta tag rather than a "
+                        "response header. This is valid and does restrict scripts, but a meta "
+                        "tag cannot carry frame-ancestors or violation reporting."
+                    ),
+                    remediation=(
+                        "This works, so no action is required for XSS protection. For full "
+                        "coverage — including clickjacking protection via frame-ancestors, which "
+                        "a meta tag cannot carry — move the same policy to a real "
+                        "Content-Security-Policy response header instead."
+                    ),
+                    penalty=0,
+                ))
+            elif key == "content-security-policy" and csp_ro_value:
                 p = PENALTY["medium"]
                 findings.append(HeaderFinding(
                     header=spec["display"],
