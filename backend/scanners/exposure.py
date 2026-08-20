@@ -193,6 +193,48 @@ _DIRECTORY_LISTING_MARKERS = (
 
 _ENV_PATTERN = re.compile(r'(?m)^[A-Z_][A-Z0-9_]*\s*=\S', re.MULTILINE)
 
+# Markup in the body means we were served a web page, not a config file. A real
+# .env is plain text; any of these means the 200 is a soft-404 or an app route.
+_HTML_MARKERS = (
+    "<!doctype html", "<html", "<head", "<body", "<script", "<div", "<meta",
+    "<title", "<link ", "<span", "<style",
+)
+
+# Env keys real .env files actually contain. Requiring one of these stops a
+# generic KEY=VALUE regex from matching stray text in an HTML page.
+_ENV_KEY_HINTS = (
+    "APP_", "DB_", "DATABASE_", "SECRET", "TOKEN", "PASSWORD", "PASSWD",
+    "API_KEY", "APIKEY", "AWS_", "STRIPE_", "MAIL_", "SMTP_", "REDIS_",
+    "JWT_", "SESSION_", "CACHE_", "QUEUE_", "S3_", "TWILIO_", "SENDGRID_",
+)
+
+
+def _looks_like_env_file(body: str, content_type: str = "") -> bool:
+    """
+    True only when the body is plausibly a real .env file.
+
+    A 200 alone proves nothing: hosted platforms (Shopify especially) answer 200
+    with a storefront 404 page for arbitrary paths, and a bare KEY=VALUE regex
+    matches incidental text inside that HTML. Require three things together —
+    plain-text content type, no HTML markup, and at least one key name that real
+    env files actually use.
+    """
+    head = body[:4000]
+    lowered = head.lower()
+
+    if any(marker in lowered for marker in _HTML_MARKERS):
+        return False
+
+    ctype = content_type.lower()
+    if ctype and not any(t in ctype for t in ("text/plain", "application/octet-stream", "text/x-env")):
+        return False
+
+    matches = _ENV_PATTERN.findall(head)
+    if not matches:
+        return False
+
+    return any(hint in head for hint in _ENV_KEY_HINTS)
+
 _CONFIRMED_SIGNATURES: dict[str, list[str]] = {
     "/.git/HEAD":     ["ref: refs/heads/", "ref: refs/"],
     "/_profiler":     ["Symfony", "sf-toolbar", "Profiler"],
@@ -205,9 +247,12 @@ _CONFIRMED_SIGNATURES: dict[str, list[str]] = {
 _POSSIBLE_ONLY_PATHS = {"/admin", "/admin/", "/wp-admin/", "/wp-login.php", "/adminer.php", "/debug"}
 
 
-def _confidence(path: str, body: str) -> str:
+def _confidence(path: str, body: str, content_type: str = "") -> str:
     if path in ("/.env", "/.env.production", "/.env.local"):
-        return "confirmed" if _ENV_PATTERN.search(body[:3000]) else "likely"
+        # No middle ground here. Either the body is a real env file or we say
+        # nothing — "likely" on a dotfile becomes "your credentials are exposed"
+        # in an email, which is not a claim to make on a status code alone.
+        return "confirmed" if _looks_like_env_file(body, content_type) else "none"
     sigs = _CONFIRMED_SIGNATURES.get(path)
     if sigs and any(s in body for s in sigs):
         return "confirmed"
@@ -220,9 +265,18 @@ def _confidence(path: str, body: str) -> str:
 # serving a catch-all route (a single-page app, or a framework that renders its
 # own 404 page with a 200 status). On such a server a 200 proves nothing, so
 # status code alone must not be treated as evidence of an exposed file.
+#
+# The probes deliberately differ in SHAPE, not just in name. Routing is often
+# shape-dependent: a server can 404 a plain path while answering 200 for a
+# dotfile or an extensioned path. Two same-shaped probes miss that entirely,
+# which is how Shopify storefronts slipped past this check and produced false
+# ".env exposed" findings.
 _CATCH_ALL_PROBES = (
     "/sekura-catchall-check-9f3a2b",
     "/sekura-catchall-check-9f3a2b/index.html",
+    "/.sekura-catchall-9f3a2b",          # dotfile, like /.env
+    "/sekura-catchall-9f3a2b.php",       # extensioned
+    "/sekura-catchall-9f3a2b/.git/HEAD",  # nested dot-directory
 )
 
 
@@ -253,8 +307,14 @@ async def _probe(
 
     if status_code == 200:
         body = resp.text[:4000]
-        conf = _confidence(probe["path"], body)
+        conf = _confidence(probe["path"], body, resp.headers.get("content-type", ""))
         sev = probe["severity"]
+
+        # "none" means the body actively contradicts the finding — a 200 that
+        # served an HTML page where a config file was claimed. Never report it,
+        # catch-all detected or not.
+        if conf == "none":
+            return None
 
         # On a catch-all server every path returns 200, so only a positive
         # content signature counts. Without one, report nothing rather than

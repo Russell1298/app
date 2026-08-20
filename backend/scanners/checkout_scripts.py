@@ -37,8 +37,31 @@ _IP_SRC_RE = re.compile(r"^https?://(\d{1,3}\.){3}\d{1,3}[:/]?")
 # merchant to "add integrity=" on these is advice they cannot act on, so the
 # finding is reported without the high penalty and with remediation that works.
 _SRI_UNSUPPORTED_HOSTS = (
+    # Payments — vendors generate these per-merchant/currency/locale and update
+    # them without notice. Pinning a hash breaks checkout the next time they ship.
     "js.stripe.com",
     "checkout.stripe.com",
+    "www.paypal.com",
+    "paypal.com/sdk",
+    "paypalobjects.com",
+    "js.braintreegateway.com",
+    "web.squarecdn.com",
+    "js.squareup.com",
+    "pay.google.com",
+    "applepay.cdn-apple.com",
+    "checkout.klarna.com",
+    "x.klarnacdn.net",
+    "cdn.shopify.com",          # Shopify's own checkout assets
+    "checkout.shopifycs.com",
+    # Fraud / risk bootstraps — deliberately rotating payloads.
+    "songbird.cardinalcommerce.com",
+    "centinelapi.cardinalcommerce.com",
+    "riskified.com",
+    "signifyd.com",
+    # Bot / consent — same rotation problem.
+    "www.google.com/recaptcha",
+    "www.gstatic.com/recaptcha",
+    "hcaptcha.com",
 )
 
 

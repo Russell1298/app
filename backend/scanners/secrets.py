@@ -60,11 +60,42 @@ _FP_URL_SEGMENTS = ("/docs/", "/examples/", "/test/", "/__tests__/", "/spec/")
 
 def _is_false_positive(pattern_name: str, context: str, source_url: str) -> bool:
     url_path = urlparse(source_url).path.lower()
+    ctx = context.lower()
+
     if any(seg in url_path for seg in _FP_URL_SEGMENTS):
         return True
-    if pattern_name == "Google API Key" and "maps.googleapis.com" in source_url:
+
+    # Google/Firebase browser API keys (AIza...) are PUBLIC BY DESIGN. They ship
+    # in client-side config and are restricted server-side by Firebase security
+    # rules and HTTP-referrer limits — that is the documented model, not a leak.
+    # Calling one "exposed" is a false alarm, and Firebase is common on small
+    # business sites.
+    if pattern_name == "Google API Key":
+        if "maps.googleapis.com" in source_url:
+            return True
+        # Require a marker that only appears in a genuine public-client config.
+        # "apikey" alone is too weak — it also appears around real leaked keys.
+        if any(m in ctx for m in (
+            "firebase", "authdomain", "projectid", "messagingsenderid",
+            "storagebucket", "measurementid", "gtag(", "googletagmanager",
+            "recaptcha", "youtube", "maps.google",
+        )):
+            return True
+
+    # Stripe/PayPal PUBLISHABLE keys are meant to be in page source.
+    if pattern_name in ("API Key", "Secret Value") and any(
+        m in ctx for m in ("pk_live_", "pk_test_", "publishable", "public_key", "client-id")
+    ):
         return True
-    return any(word in context.lower() for word in _FP_CONTEXT_WORDS)
+
+    # Validation copy, not a credential: password: "Password must be 8+ characters".
+    if pattern_name == "Hardcoded Password" and any(m in ctx for m in (
+        "must be", "at least", "minimum", "too short", "required", "invalid",
+        "confirm", "placeholder", "enter your", "characters",
+    )):
+        return True
+
+    return any(word in ctx for word in _FP_CONTEXT_WORDS)
 
 
 def _redact(match: str) -> str:
