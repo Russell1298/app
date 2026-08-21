@@ -1,5 +1,6 @@
 import uuid
 import asyncio
+import secrets
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -220,36 +221,25 @@ async def list_scans(
 @router.get("/scans/{scan_id}", response_model=FullScanResult)
 async def get_scan(
     scan_id: str,
+    token: str | None = Query(default=None, description="Share token, for a report sent to a client"),
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
 ) -> FullScanResult:
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database not configured")
-
-    try:
-        job_id = uuid.UUID(scan_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid scan ID format")
-
-    row = await db.get(ScanJob, job_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Scan not found")
-
-    # Scans with a user_id are private — only the owner can access them
-    if row.user_id and row.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    result = FullScanResult.model_validate(row.result)
-    result.scan_id = str(row.id)
-    result.paid = row.paid
-    return result
+    # Single source of truth for access — this used to re-implement the check
+    # and would have needed the share-token logic duplicated too.
+    return await _load_scan(scan_id, db, user_id, token)
 
 
 # ---------------------------------------------------------------------------
 # Business reports (HTML + PDF)
 # ---------------------------------------------------------------------------
 
-async def _load_scan(scan_id: str, db: AsyncSession | None, user_id: str | None = None) -> FullScanResult:
+async def _load_scan(
+    scan_id: str,
+    db: AsyncSession | None,
+    user_id: str | None = None,
+    share_token: str | None = None,
+) -> FullScanResult:
     if db is None:
         raise HTTPException(status_code=503, detail="Database not configured")
     try:
@@ -259,22 +249,94 @@ async def _load_scan(scan_id: str, db: AsyncSession | None, user_id: str | None 
     row = await db.get(ScanJob, job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Scan not found")
+    # A scan belonging to an account is private, unless the caller presents the
+    # share token the owner minted for it. compare_digest keeps the check from
+    # leaking token contents through response timing.
     if row.user_id and row.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        token_ok = bool(
+            share_token
+            and row.share_token
+            and secrets.compare_digest(share_token, row.share_token)
+        )
+        if not token_ok:
+            raise HTTPException(status_code=403, detail="Access denied")
     result = FullScanResult.model_validate(row.result)
     result.scan_id = str(row.id)
     result.paid = row.paid
     return result
 
 
+@router.post("/scans/{scan_id}/share")
+async def create_share_link(
+    scan_id: str,
+    db: AsyncSession | None = Depends(get_db),
+    user_id: str | None = Depends(get_optional_user_id),
+    is_owner: bool = Depends(get_is_owner),
+) -> dict:
+    """
+    Mint (or return) a share token for a scan, so its report can be sent to the
+    business it describes without exposing the rest of the account's scans.
+
+    Only the scan's owner can call this. The token is generated once and reused,
+    so re-sharing the same scan does not invalidate a link already emailed out.
+    """
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not configured")
+    try:
+        job_id = uuid.UUID(scan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid scan ID")
+
+    row = await db.get(ScanJob, job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if row.user_id and row.user_id != user_id and not is_owner:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not row.share_token:
+        row.share_token = secrets.token_urlsafe(32)
+        row.shared_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    return {"scan_id": str(row.id), "share_token": row.share_token}
+
+
+@router.delete("/scans/{scan_id}/share")
+async def revoke_share_link(
+    scan_id: str,
+    db: AsyncSession | None = Depends(get_db),
+    user_id: str | None = Depends(get_optional_user_id),
+    is_owner: bool = Depends(get_is_owner),
+) -> dict:
+    """Revoke a share link. Any URL already sent out stops working immediately."""
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not configured")
+    try:
+        job_id = uuid.UUID(scan_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid scan ID")
+
+    row = await db.get(ScanJob, job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if row.user_id and row.user_id != user_id and not is_owner:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    row.share_token = None
+    row.shared_at = None
+    await db.commit()
+    return {"revoked": True}
+
+
 @router.get("/scans/{scan_id}/report", response_class=HTMLResponse)
 async def download_html_report(
     scan_id: str,
     client_name: str = Query(default="", description="Client or company name for the cover page"),
+    token: str | None = Query(default=None, description="Share token, for a report sent to a client"),
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
 ) -> HTMLResponse:
-    result = await _load_scan(scan_id, db, user_id)
+    result = await _load_scan(scan_id, db, user_id, token)
     html = generate_html(result, client_name=client_name)
     filename = f"security-report-{result.domain}.html"
     return HTMLResponse(
@@ -289,6 +351,7 @@ async def download_pdf_report(
     request: Request,
     scan_id: str,
     client_name: str = Query(default="", description="Client or company name for the cover page"),
+    token: str | None = Query(default=None, description="Share token, for a report sent to a client"),
     db: AsyncSession | None = Depends(get_db),
     user_id: str | None = Depends(get_optional_user_id),
 ) -> Response:
@@ -296,7 +359,7 @@ async def download_pdf_report(
     # we do, so it is a marketing asset rather than something to gate. The rate
     # limit is only an abuse guard: rendering a PDF is CPU-heavy, so this is the
     # most expensive endpoint to hammer. It is not a usage quota.
-    result = await _load_scan(scan_id, db, user_id)
+    result = await _load_scan(scan_id, db, user_id, token)
     loop = asyncio.get_running_loop()
     pdf_bytes = await loop.run_in_executor(None, generate_pdf, result, client_name)
     filename = f"security-report-{result.domain}.pdf"

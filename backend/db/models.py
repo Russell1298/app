@@ -55,3 +55,9 @@ class ScanJob(Base):
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    # Unguessable token minted only when the owner explicitly shares a scan.
+    # Scans stay private by default; holding this token is what grants access,
+    # so a report can be sent to a prospect without making the account's whole
+    # scan history readable.
+    share_token: Mapped[str | None] = mapped_column(String(43), nullable=True, index=True)
+    shared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
