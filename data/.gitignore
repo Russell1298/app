@@ -1,0 +1,8 @@
+# Research pipeline generated outputs — not committed
+_umbrella_cache.csv
+*.db
+logs/
+aggregates.json
+
+# Keep targets.csv if manually curated, but exclude auto-generated ones
+# targets.csv
