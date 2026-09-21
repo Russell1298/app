@@ -7,7 +7,7 @@ from models.scan import (
     FingerprintScanResult, SecretScanResult, SecretFinding, CheckoutScriptScanResult,
     DNSHijackScanResult,
 )
-from reports.action_plan import build_action_plan, _wrap_mono, _redact
+from reports.action_plan import build_action_plan, _wrap_mono, _redact, _dmarc_value
 from reports.html_report import generate_action_plan_html
 
 TS = "2026-09-21T02:14:55+00:00"
@@ -190,3 +190,25 @@ def test_html_renders_for_every_shape():
             risk_score=0, risk_level="low", summary={}))):
         html = generate_action_plan_html(result, client_name="Acme Ltd")
         assert "Sekura" in html and "sekura.cloud" in html
+
+
+def test_dmarc_is_read_from_its_own_record_type():
+    """
+    The DNS scanner publishes the _dmarc lookup as a "DMARC" record, not inside
+    TXT. Reading only TXT reported a published policy as missing.
+    """
+    result = make_result(dns=DNSScanResult(
+        domain="sekura.cloud", scan_timestamp=TS,
+        records=[
+            DNSRecord(record_type="TXT", values=["v=spf1 include:zoho.com ~all"]),
+            DNSRecord(record_type="DMARC", values=[DMARC]),
+        ],
+        findings=[DNSFinding(check="DMARC", status="warn", severity="medium",
+                             description="Policy is none.", remediation="Enforce.")],
+        risk_score=12, risk_level="low", summary={}))
+
+    assert _dmarc_value(result) == DMARC
+    plan = build_action_plan(result)
+    assert "DMARC p=none" in plan.evidence_rows[0].note
+    observed = "\n".join(plan.actions[0].observed.lines)
+    assert "rua=mailto:dmarc@sekura.cloud" in observed

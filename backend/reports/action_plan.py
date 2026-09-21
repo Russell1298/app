@@ -168,6 +168,23 @@ def _find_txt(result: FullScanResult, marker: str) -> str | None:
     return None
 
 
+def _dmarc_value(result: FullScanResult) -> str | None:
+    """
+    The DNS scanner publishes the _dmarc lookup as its own record type rather
+    than folding it into TXT, so check there first and fall back to TXT for
+    scans stored in the older shape.
+    """
+    for record in result.dns.records:
+        if record.record_type.upper() == "DMARC":
+            for value in record.values:
+                if "v=dmarc1" in value.lower():
+                    return value
+    for value in _txt_values(result):
+        if "v=dmarc1" in value.lower():
+            return value
+    return None
+
+
 def _severity_word(severity: str | None) -> str:
     return {"high": "high", "medium": "medium", "low": "low"}.get(severity or "", "informational")
 
@@ -395,12 +412,7 @@ def _action_email(result: FullScanResult) -> Action | None:
     if not dmarc_findings and not spf_findings:
         return None
 
-    dmarc_value = _find_txt(result, "v=DMARC1")
-    if not dmarc_value:
-        for value in _txt_values(result):
-            if "v=dmarc1" in value.lower():
-                dmarc_value = value
-                break
+    dmarc_value = _dmarc_value(result)
     spf_value = _find_txt(result, "v=spf1")
 
     lines: list[str] = []
@@ -865,8 +877,7 @@ def _evidence_rows(result: FullScanResult) -> list[EvidenceRow]:
         rows.append(EvidenceRow("DNS + email", "No DNS records were returned. The lookups did not complete.", False))
     else:
         observed: list[str] = []
-        dmarc = next((v for v in _txt_values(result) if "v=dmarc1" in v.lower()), None)
-        policy = re.search(r"\bp=(\w+)", dmarc or "")
+        policy = re.search(r"\bp=(\w+)", _dmarc_value(result) or "")
         observed.append(f"DMARC {policy.group(0)}" if policy else "no DMARC record")
         spf = _find_txt(result, "v=spf1")
         qualifier = re.search(r"([-~?+]all)\s*$", spf or "")
