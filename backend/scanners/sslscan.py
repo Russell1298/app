@@ -7,37 +7,130 @@ Passive TLS handshake inspection. No traffic decryption, no exploitation.
 import ssl
 import socket
 import asyncio
+import certifi
+import httpx
 from datetime import datetime, timezone
 from cryptography import x509
 from models.scan import CertInfo, TLSVersionCheck, SSLFinding, SSLScanResult, utc_now_iso
 from scoring_config import PENALTY, scanner_score, risk_level
 
 PORT = 443
+# The public root store, independent of this machine's trust configuration.
+# A corporate proxy, an egress gateway or a container base image can install a
+# CA into the system store; none of them can get a CA into Mozilla's program.
+# That difference is what lets us tell interception from a genuine site cert.
+PUBLIC_ROOTS = certifi.where()
+CT_URL = "https://crt.sh/?q={domain}&output=json"
+CT_TIMEOUT = 10
 CONNECT_TIMEOUT = 8
 EXPIRY_CRITICAL_DAYS = 7
 EXPIRY_WARN_DAYS = 30
 WEAK_CIPHER_PATTERNS = ("RC4", "DES", "3DES", "EXPORT", "NULL", "ANON", "MD5", "ADH", "AECDH")
 
 
-def _get_cert_and_cipher(domain: str) -> tuple[bytes | None, tuple | None, str | None]:
-    ctx = ssl.create_default_context()
+def _handshake(domain: str, port: int, cafile: str | None, verify: bool) -> tuple[bytes | None, tuple | None, str | None]:
+    """One TLS handshake. Returns (DER certificate, cipher, error)."""
+    if verify:
+        ctx = ssl.create_default_context(cafile=cafile)
+    else:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
     try:
-        with socket.create_connection((domain, PORT), timeout=CONNECT_TIMEOUT) as sock:
+        with socket.create_connection((domain, port), timeout=CONNECT_TIMEOUT) as sock:
             with ctx.wrap_socket(sock, server_hostname=domain) as tls:
                 return tls.getpeercert(binary_form=True), tls.cipher(), None
-    except ssl.SSLCertVerificationError as e:
-        ctx_nv = ssl.create_default_context()
-        ctx_nv.check_hostname = False
-        ctx_nv.verify_mode = ssl.CERT_NONE
-        try:
-            with socket.create_connection((domain, PORT), timeout=CONNECT_TIMEOUT) as sock:
-                with ctx_nv.wrap_socket(sock, server_hostname=domain) as tls:
-                    return tls.getpeercert(binary_form=True), tls.cipher(), str(e)
-        except Exception:
-            pass
-        return None, None, str(e)
     except Exception as e:
         return None, None, str(e)
+
+
+def _get_cert_and_cipher(domain: str, port: int = PORT) -> tuple[bytes | None, tuple | None, str | None, bool]:
+    """
+    Read the certificate the server presents, and decide whether we are being
+    shown the real one.
+
+    The connection is validated twice: once against the public root store and
+    once against this machine's own trust configuration. A chain that this
+    machine trusts but the public roots do not is signed by a locally installed
+    CA, which means something on the path terminated the TLS session. That is
+    the definition of interception, and it is the one case where the
+    certificate we can see is not the certificate a visitor receives.
+
+    Returns (DER, cipher, verify_error, intercepted).
+    """
+    der, cipher, public_error = _handshake(domain, port, PUBLIC_ROOTS, verify=True)
+    if der is not None:
+        # Chains to a public root: this is the certificate the internet sees.
+        return der, cipher, None, False
+
+    der_sys, cipher_sys, system_error = _handshake(domain, port, None, verify=True)
+    if der_sys is not None:
+        # Trusted here, not trusted publicly: a local CA signed it.
+        return der_sys, cipher_sys, None, True
+
+    # Untrusted either way. Read it unverified so the finding can describe it,
+    # and report the public store's error, which is the one a visitor would hit.
+    der_raw, cipher_raw, _ = _handshake(domain, port, None, verify=False)
+    return der_raw, cipher_raw, public_error or system_error, False
+
+
+async def _cert_from_ct_log(domain: str) -> CertInfo | None:
+    """
+    Fall back to certificate transparency when the network intercepts TLS.
+
+    This is a passive public-log lookup, the same source the subdomain scanner
+    uses. It tells us which certificate was issued for the domain, not which
+    one the server is actually serving, so callers must label it as such.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=CT_TIMEOUT) as client:
+            resp = await client.get(CT_URL.format(domain=domain))
+        if resp.status_code != 200:
+            return None
+        entries = resp.json()
+    except Exception:
+        return None
+
+    now = datetime.now(timezone.utc)
+    best: dict | None = None
+    best_expiry: datetime | None = None
+    for entry in entries:
+        try:
+            expiry = datetime.fromisoformat(entry["not_after"]).replace(tzinfo=timezone.utc)
+        except (KeyError, ValueError, TypeError):
+            continue
+        names = [n.strip().lower() for n in (entry.get("name_value") or "").split("\n")]
+        if domain not in names and f"*.{domain.split('.', 1)[-1]}" not in names:
+            continue
+        if expiry < now:
+            continue
+        if best_expiry is None or expiry < best_expiry:
+            # The certificate in use is the valid one expiring soonest, not the
+            # longest-dated record in the log.
+            best, best_expiry = entry, expiry
+
+    if best is None or best_expiry is None:
+        return None
+
+    try:
+        not_before = datetime.fromisoformat(best["not_before"]).replace(tzinfo=timezone.utc).isoformat()
+    except (KeyError, ValueError, TypeError):
+        not_before = ""
+    sans = sorted({
+        n.strip().lower().lstrip("*.")
+        for n in (best.get("name_value") or "").split("\n") if n.strip()
+    })
+    return CertInfo(
+        subject=best.get("common_name") or domain,
+        issuer=best.get("issuer_name") or "unknown",
+        not_before=not_before,
+        not_after=best_expiry.isoformat(),
+        days_until_expiry=(best_expiry - now).days,
+        is_self_signed=False,
+        sans=sans,
+        serial_number=str(best.get("serial_number") or ""),
+        source="ct_log",
+    )
 
 
 def _probe_tls_version(domain: str, version: ssl.TLSVersion) -> bool | None:
@@ -166,6 +259,32 @@ def _findings_from_cert(
     return findings, triggers
 
 
+def _findings_from_ct_cert(cert: CertInfo, domain: str) -> list[SSLFinding]:
+    """
+    Findings for a certificate read from the transparency log rather than from
+    the server. They carry no penalty: an intercepted scan must not move the
+    customer's score in either direction, because we did not see their server.
+    """
+    caveat = (" This comes from the public certificate transparency log, not from this site's "
+              "server, because the network between the scanner and the site intercepts TLS. "
+              "Confirm it from a connection without TLS inspection.")
+    findings = [SSLFinding(
+        check="Certificate authority", status="info", severity=None,
+        description=f"The most recent certificate logged for {domain} was issued by {cert.issuer}." + caveat,
+        remediation=None, penalty=0,
+    )]
+    if cert.days_until_expiry < 0:
+        state = f"expired {abs(cert.days_until_expiry)} day(s) ago"
+    else:
+        state = f"expires in {cert.days_until_expiry} day(s)"
+    findings.append(SSLFinding(
+        check="Certificate expiry", status="info", severity=None,
+        description=f"The logged certificate {state}." + caveat,
+        remediation=None, penalty=0,
+    ))
+    return findings
+
+
 def _findings_from_tls_versions(checks: list[TLSVersionCheck]) -> list[SSLFinding]:
     findings: list[SSLFinding] = []
     version_map = {c.version: c.supported for c in checks}
@@ -280,39 +399,84 @@ def _score(findings: list[SSLFinding]) -> tuple[int, str]:
 async def scan_ssl(domain: str, port: int = PORT) -> SSLScanResult:
     loop = asyncio.get_event_loop()
 
-    def _run_all():
-        der, cipher, verify_error = _get_cert_and_cipher(domain)
-        tls_results = []
-        for label, version in [
-            ("TLS 1.0", ssl.TLSVersion.TLSv1),
-            ("TLS 1.1", ssl.TLSVersion.TLSv1_1),
-            ("TLS 1.2", ssl.TLSVersion.TLSv1_2),
-            ("TLS 1.3", ssl.TLSVersion.TLSv1_3),
-        ]:
-            tls_results.append(TLSVersionCheck(version=label, supported=_probe_tls_version(domain, version)))
-        return der, cipher, verify_error, tls_results
+    def _read_certificate():
+        return _get_cert_and_cipher(domain, port)
 
-    der, cipher, verify_error, tls_version_results = await loop.run_in_executor(None, _run_all)
+    def _probe_versions():
+        return [
+            TLSVersionCheck(version=label, supported=_probe_tls_version(domain, version))
+            for label, version in [
+                ("TLS 1.0", ssl.TLSVersion.TLSv1),
+                ("TLS 1.1", ssl.TLSVersion.TLSv1_1),
+                ("TLS 1.2", ssl.TLSVersion.TLSv1_2),
+                ("TLS 1.3", ssl.TLSVersion.TLSv1_3),
+            ]
+        ]
+
+    der, cipher, verify_error, intercepted = await loop.run_in_executor(None, _read_certificate)
 
     findings: list[SSLFinding] = []
     critical_triggers: list[str] = []
     cert_info: CertInfo | None = None
+    interception_note: str | None = None
 
-    if der is None:
+    if intercepted:
+        # Everything reachable over this connection describes the proxy that
+        # terminated it. Probing protocol versions would measure the proxy and
+        # report it as the customer's configuration, so we do not probe at all.
+        proxy_issuer = "an unknown local authority"
+        if der is not None:
+            try:
+                proxy_issuer = _parse_cert(der).issuer
+            except Exception:
+                pass
+        interception_note = (
+            f"TLS interception detected: the certificate presented for {domain} was signed by "
+            f"{proxy_issuer}, a certificate authority trusted only on the scanner's own machine. "
+            "The scan cannot observe this site's real certificate or protocol support from this network."
+        )
         findings.append(SSLFinding(
-            check="TLS reachability", status="fail", severity="high",
-            description=f"Could not establish a TLS connection to {domain}:{port}. Error: {verify_error}",
-            remediation="We couldn't make a secure HTTPS connection on port 443. Make sure HTTPS is set up and your server is reachable. If your site only works on http://, install an SSL certificate (Let's Encrypt is free) and open port 443 in your firewall.",
-            penalty=PENALTY["high"],
+            check="TLS inspection on the scan path", status="info", severity=None,
+            description=interception_note,
+            remediation=(
+                "No action is required from the site owner. This is a limitation of the network the "
+                "scan ran from, and the certificate results below come from public logs instead."
+            ),
+            penalty=0,
         ))
+        tls_version_results = [
+            TLSVersionCheck(version=label, supported=None)
+            for label in ("TLS 1.0", "TLS 1.1", "TLS 1.2", "TLS 1.3")
+        ]
+        cert_info = await _cert_from_ct_log(domain)
+        if cert_info is not None:
+            findings += _findings_from_ct_cert(cert_info, domain)
+        else:
+            findings.append(SSLFinding(
+                check="Certificate", status="info", severity=None,
+                description=(
+                    "No usable certificate record was found for this domain in the public "
+                    "transparency logs, and the live certificate could not be read from this network."
+                ),
+                remediation=None, penalty=0,
+            ))
     else:
-        cert_info = _parse_cert(der)
-        cert_findings, cert_triggers = _findings_from_cert(cert_info, domain, verify_error)
-        findings += cert_findings
-        critical_triggers += cert_triggers
-        cipher_finding = _finding_from_cipher(cipher)
-        if cipher_finding:
-            findings.append(cipher_finding)
+        tls_version_results = await loop.run_in_executor(None, _probe_versions)
+        if der is None:
+            findings.append(SSLFinding(
+                check="TLS reachability", status="fail", severity="high",
+                description=f"Could not establish a TLS connection to {domain}:{port}. Error: {verify_error}",
+                remediation="We couldn't make a secure HTTPS connection on port 443. Make sure HTTPS is set up and your server is reachable. If your site only works on http://, install an SSL certificate (Let's Encrypt is free) and open port 443 in your firewall.",
+                penalty=PENALTY["high"],
+            ))
+        else:
+            cert_info = _parse_cert(der)
+            cert_findings, cert_triggers = _findings_from_cert(cert_info, domain, verify_error)
+            findings += cert_findings
+            critical_triggers += cert_triggers
+            cipher_finding = _finding_from_cipher(cipher)
+            if cipher_finding:
+                findings.append(cipher_finding)
 
     findings += _findings_from_tls_versions(tls_version_results)
     risk_score, level = _score(findings)
@@ -321,6 +485,8 @@ async def scan_ssl(domain: str, port: int = PORT) -> SSLScanResult:
         domain=domain, port=port,
         scan_timestamp=utc_now_iso(),
         certificate=cert_info,
+        intercepted=intercepted,
+        interception_note=interception_note,
         tls_versions=tls_version_results,
         findings=findings,
         risk_score=risk_score,
@@ -332,5 +498,7 @@ async def scan_ssl(domain: str, port: int = PORT) -> SSLScanResult:
             "warn": sum(1 for f in findings if f.status == "warn"),
             "pass": sum(1 for f in findings if f.status == "pass"),
             "certificate_present": cert_info is not None,
+            "certificate_source": cert_info.source if cert_info else None,
+            "intercepted": intercepted,
         },
     )

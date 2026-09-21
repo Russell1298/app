@@ -127,6 +127,11 @@ class CertInfo(BaseModel):
     is_self_signed: bool
     sans: list[str]
     serial_number: str
+    # Where these values came from. "handshake" is the certificate the server
+    # presented to us. "ct_log" is a certificate transparency record, used when
+    # the network between us and the site intercepts TLS: it is evidence of
+    # issuance, not evidence of what a visitor receives.
+    source: Literal["handshake", "ct_log"] = "handshake"
 
 
 class TLSVersionCheck(BaseModel):
@@ -148,6 +153,11 @@ class SSLScanResult(BaseModel):
     port: int
     scan_timestamp: str
     certificate: CertInfo | None
+    # True when a TLS-intercepting proxy sat between the scanner and the site.
+    # Everything observed through such a connection describes the proxy, not
+    # the site, so the scan must not present it as the site's own TLS posture.
+    intercepted: bool = False
+    interception_note: str | None = None
     tls_versions: list[TLSVersionCheck]
     findings: list[SSLFinding]
     risk_score: int

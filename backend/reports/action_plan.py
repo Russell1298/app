@@ -146,6 +146,14 @@ def _wrap_mono(value: str, width: int = MONO_WRAP) -> list[str]:
     return lines or [value]
 
 
+def _fmt_date(value: str) -> str:
+    """Render an ISO timestamp as a date a business owner can read."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%d %b %Y")
+    except (ValueError, AttributeError):
+        return value or "unknown"
+
+
 def _txt_values(result: FullScanResult) -> list[str]:
     for record in result.dns.records:
         if record.record_type == "TXT":
@@ -201,9 +209,15 @@ _INTERCEPT_MARKERS = (
 
 
 def _cert_is_intercepted(result: FullScanResult) -> bool:
+    # The scanner now detects interception directly and says so. The checks
+    # below remain for scans stored before that flag existed.
+    if getattr(result.ssl, "intercepted", False):
+        return True
     cert = result.ssl.certificate
     if not cert:
         return False
+    if cert.source == "ct_log":
+        return True
     issuer = (cert.issuer or "").lower()
     if any(marker in issuer for marker in _INTERCEPT_MARKERS):
         return True
@@ -466,18 +480,30 @@ def _action_certificate(result: FullScanResult) -> Action | None:
     if cert:
         lines += _wrap_mono(f"subject: {cert.subject}")
         lines += _wrap_mono(f"issuer:  {cert.issuer}")
-        lines.append(f"expires: {cert.not_after}  ({cert.days_until_expiry} days)")
+        lines.append(f"expires: {_fmt_date(cert.not_after)}  ({cert.days_until_expiry} days)")
     else:
-        lines.append("no certificate was returned by the scan")
+        lines.append("no certificate could be read for this domain")
+
+    from_ct = bool(cert and cert.source == "ct_log")
+    observed_caption = "FROM CERTIFICATE TRANSPARENCY" if from_ct else "SUBJECT, ISSUER, EXPIRY"
 
     if intercepted:
-        kicker = "Certificate alert: unverified / Source: TLS inspection suspected"
-        intro = (
-            f"The certificate recorded for this scan was issued by "
-            f"{(cert.issuer if cert else 'an unexpected authority')}. That indicates a gateway or "
-            "inspection proxy between the scanner and the site, so it is not reliable evidence of what "
-            "a visitor's browser receives."
+        kicker = "Certificate alert: unverified / Source: " + (
+            "public certificate transparency log" if from_ct else "TLS inspection on the scan path"
         )
+        if from_ct:
+            intro = (
+                "The network the scan ran from intercepts TLS, so the scanner could not read this "
+                "site's live certificate. The values below are the most recent certificate logged "
+                "publicly for the domain: evidence that it was issued, not evidence of what a "
+                "visitor's browser receives today."
+            )
+        else:
+            intro = (
+                "The network the scan ran from intercepts TLS and no public certificate record was "
+                "available, so this site's certificate could not be established at all. Nothing here "
+                "should be read as a finding about the site until it is checked directly."
+            )
         band = BAND_VERIFY
         headline = "Check the certificate evidence"
         brief = (
@@ -520,7 +546,7 @@ def _action_certificate(result: FullScanResult) -> Action | None:
         detail_title="Verify first. Then configure.",
         detail_kicker=kicker,
         detail_intro=intro,
-        observed=CodeBlock("CERTIFICATE AS RECORDED", "SUBJECT, ISSUER, EXPIRY", lines),
+        observed=CodeBlock("CERTIFICATE AS RECORDED", observed_caption, lines),
         steps=steps,
         verify=CodeBlock("INSPECT PUBLIC LEAF CERTIFICATE", "BASH + OPENSSL", [
             f"openssl s_client -connect {result.domain}:443 \\",
@@ -855,14 +881,20 @@ def _evidence_rows(result: FullScanResult) -> list[EvidenceRow]:
         ))
 
     # TLS / certificate
-    if not result.ssl.certificate:
+    cert = result.ssl.certificate
+    if _cert_is_intercepted(result):
+        if cert is not None and cert.source == "ct_log":
+            note = ("The scan network intercepts TLS. Certificate details come from the public "
+                    "transparency log; protocol support was not tested.")
+        elif cert is not None:
+            note = ("A locally trusted issuer was recorded, so the connection was intercepted. The "
+                    "certificate and protocol results need independent verification.")
+        else:
+            note = ("The scan network intercepts TLS and no public certificate record was found, so "
+                    "the certificate could not be established at all.")
+        rows.append(EvidenceRow("TLS / certificate", note, False))
+    elif cert is None:
         rows.append(EvidenceRow("TLS / certificate", "No certificate was returned. The handshake result cannot be assessed.", False))
-    elif _cert_is_intercepted(result):
-        rows.append(EvidenceRow(
-            "TLS / certificate",
-            "A gateway issuer was recorded. The public certificate and protocol results need independent verification.",
-            False,
-        ))
     else:
         tested = [v for v in result.ssl.tls_versions if v.supported is not None]
         rows.append(EvidenceRow(
