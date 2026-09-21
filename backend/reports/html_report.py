@@ -502,7 +502,28 @@ def generate_html(
     return template.render(**context)
 
 
+def generate_action_plan_html(result: FullScanResult, client_name: str = "") -> str:
+    """
+    The Sekura Action Plan: a four-page owner brief that names three actions,
+    an owner for each, and the evidence behind them. This is the client-facing
+    deliverable. generate_html() above remains the long-form detailed report,
+    kept for internal use and for anyone who needs the full finding list.
+    """
+    from reports.action_plan import build_action_plan
+
+    plan = build_action_plan(result, client_name=client_name)
+    template = _jinja.get_template("action_plan.html")
+    return template.render(plan=plan, company=COMPANY)
+
+
 def generate_pdf(result: FullScanResult, client_name: str = "") -> bytes:
-    from weasyprint import HTML, CSS
+    from weasyprint import HTML
+    html_str = generate_action_plan_html(result, client_name)
+    return HTML(string=html_str, base_url=".").write_pdf()
+
+
+def generate_detailed_pdf(result: FullScanResult, client_name: str = "") -> bytes:
+    """Long-form detailed report as a PDF. Not served by default."""
+    from weasyprint import HTML
     html_str = generate_html(result, client_name)
     return HTML(string=html_str, base_url=".").write_pdf()

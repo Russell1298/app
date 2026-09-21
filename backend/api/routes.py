@@ -16,7 +16,7 @@ from scanners.sslscan import scan_ssl
 from scanners.exposure import scan_exposure
 from scanners.fingerprint import scan_fingerprint
 from services.scan_orchestrator import run_full_scan
-from reports.html_report import generate_html, generate_pdf
+from reports.html_report import generate_action_plan_html, generate_pdf
 from models.lead import LeadRequest, LeadResponse, LeadItem
 from db.session import get_db
 from db.models import ScanJob, Lead
@@ -337,8 +337,8 @@ async def download_html_report(
     user_id: str | None = Depends(get_optional_user_id),
 ) -> HTMLResponse:
     result = await _load_scan(scan_id, db, user_id, token)
-    html = generate_html(result, client_name=client_name)
-    filename = f"security-report-{result.domain}.html"
+    html = generate_action_plan_html(result, client_name=client_name)
+    filename = f"sekura-action-plan-{result.domain}.html"
     return HTMLResponse(
         content=html,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
@@ -362,7 +362,7 @@ async def download_pdf_report(
     result = await _load_scan(scan_id, db, user_id, token)
     loop = asyncio.get_running_loop()
     pdf_bytes = await loop.run_in_executor(None, generate_pdf, result, client_name)
-    filename = f"security-report-{result.domain}.pdf"
+    filename = f"sekura-action-plan-{result.domain}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

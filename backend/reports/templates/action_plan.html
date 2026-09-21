@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sekura Action Plan: {{ plan.domain }}</title>
+<style>
+  /* ── Page ─────────────────────────────────────────────── */
+  @page { size: letter; margin: 0; }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --navy:   #101c30;
+    --blue:   #205eeb;
+    --ink:    #16202f;
+    --muted:  #556373;
+    --rule:   #d9dee6;
+    --block:  #f1f3f6;
+    --alt:    #f6f8fa;
+  }
+
+  body {
+    font-family: Arial, 'Liberation Sans', 'Helvetica Neue', sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.5;
+    color: var(--ink);
+    background: #ffffff;
+  }
+
+  code, .mono { font-family: Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace; }
+
+  .sheet {
+    position: relative;
+    width: 8.5in;
+    height: 11in;
+    padding: 24pt 42.4pt 0 42.4pt;
+    overflow: hidden;
+    page-break-after: always;
+  }
+  .sheet:last-child { page-break-after: auto; }
+
+  /* Blue spine down the left edge of every page */
+  .spine {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 8pt;
+    background: var(--blue);
+  }
+
+  /* ── Header ───────────────────────────────────────────── */
+  .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding-bottom: 20pt;
+    border-bottom: 0.75pt solid var(--rule);
+  }
+  .brand { display: flex; align-items: center; gap: 9pt; }
+  .brand-name { font-size: 15pt; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
+  .head-meta { text-align: right; padding-top: 2pt; }
+  .head-meta .l1 {
+    font-size: 7pt; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink);
+  }
+  .head-meta .l2 {
+    font-size: 7pt; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--muted); margin-top: 3pt;
+  }
+
+  /* ── Shared type ──────────────────────────────────────── */
+  .kicker {
+    margin-top: 22pt;
+    font-size: 8pt; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--blue);
+  }
+  .kicker .sep { color: var(--rule); padding: 0 3pt; }
+  .kicker .num { color: var(--ink); }
+
+  h1 {
+    margin-top: 11pt;
+    font-size: 34pt; font-weight: 700; line-height: 1.14;
+    letter-spacing: -0.022em; color: var(--ink);
+  }
+  h1.tight { font-size: 26pt; }
+
+  .standfirst { margin-top: 13pt; font-size: 10.5pt; color: var(--ink); max-width: 460pt; }
+  .subkicker  { margin-top: 9pt; font-size: 10pt; color: var(--muted); }
+
+  .label {
+    font-size: 7.5pt; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--blue);
+  }
+  .label-muted { color: var(--muted); }
+
+  p + p { margin-top: 8pt; }
+
+  /* ── Start-here banner (page 1) ───────────────────────── */
+  .banner {
+    margin-top: 24pt;
+    height: 56pt;
+    background: var(--navy);
+    color: #ffffff;
+    padding: 11pt 18pt;
+  }
+  .banner .l1 {
+    font-size: 7.5pt; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: #8babf4;
+  }
+  .banner .l2 { margin-top: 5pt; font-size: 11pt; font-weight: 700; }
+
+  /* ── Action rows (page 1) ─────────────────────────────── */
+  .action-row {
+    display: flex;
+    padding: 13pt 0 10pt 0;
+    border-bottom: 0.75pt solid var(--rule);
+  }
+  .action-row:first-of-type { border-top: 0; }
+  .action-left { width: 111pt; flex: 0 0 111pt; }
+  .action-band {
+    font-size: 7.5pt; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--blue);
+  }
+  .action-num {
+    margin-top: 6pt;
+    font-size: 21pt; font-weight: 700; color: var(--blue);
+    letter-spacing: 0.02em;
+  }
+  .action-body { flex: 1; }
+  .action-title { font-size: 12pt; font-weight: 700; color: var(--ink); }
+  .action-text { margin-top: 5pt; font-size: 10pt; color: var(--ink); }
+  .action-meta { margin-top: 11pt; font-size: 8.5pt; color: var(--muted); }
+  .action-meta .bar { color: var(--rule); padding: 0 4pt; }
+
+  .empty-state { margin-top: 26pt; font-size: 11pt; color: var(--ink); }
+
+  /* ── Offer block (page 1) ─────────────────────────────── */
+  .offer { margin-top: 20pt; }
+  .offer-q { font-size: 11pt; font-weight: 700; color: var(--ink); }
+  .offer-a { margin-top: 5pt; font-size: 9.5pt; color: var(--blue); }
+
+  /* ── Code / evidence blocks ───────────────────────────── */
+  .block { margin-top: 16pt; background: var(--block); padding: 12pt 16pt 14pt 16pt; }
+  .block-label {
+    font-size: 7.5pt; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .block-label .sep { color: #aab3bf; padding: 0 3pt; }
+  .block pre {
+    margin-top: 9pt;
+    font-family: Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace;
+    font-size: 8.5pt; line-height: 1.55; color: var(--ink);
+    white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* ── Change plan (page 2) ─────────────────────────────── */
+  .plan { margin-top: 18pt; }
+  .plan .label { margin-bottom: 8pt; }
+  .step { margin-top: 8pt; font-size: 10pt; }
+  .step b { font-weight: 700; }
+
+  .done { margin-top: 18pt; }
+  .done .label { margin-bottom: 5pt; }
+  .done p { font-size: 10pt; }
+
+  /* ── Compact detail (page 3) ──────────────────────────── */
+  .unit { margin-top: 20pt; }
+  .unit:first-of-type { margin-top: 22pt; }
+  .unit-head { font-size: 8pt; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
+  .unit-head .num { color: var(--ink); }
+  .unit-head .sep { color: var(--rule); padding: 0 3pt; }
+  .unit-head .name { color: var(--blue); }
+  .unit-title { margin-top: 7pt; font-size: 13pt; font-weight: 700; color: var(--ink); }
+  .unit p { margin-top: 7pt; font-size: 9.5pt; }
+  .unit .block { margin-top: 11pt; padding: 10pt 14pt 12pt 14pt; }
+  .unit .block pre { font-size: 8pt; margin-top: 7pt; }
+  .inline-label { font-weight: 700; color: var(--ink); }
+
+  /* ── Evidence table (page 4) ──────────────────────────── */
+  table { width: 100%; border-collapse: collapse; margin-top: 20pt; }
+  thead th {
+    background: var(--navy); color: #ffffff; text-align: left;
+    font-size: 7.5pt; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+    padding: 9pt 12pt;
+  }
+  tbody td {
+    padding: 10pt 12pt; font-size: 9.5pt; vertical-align: top;
+    border-bottom: 0.75pt solid #e6eaef;
+  }
+  tbody tr:nth-child(odd) td { background: var(--alt); }
+  td.area { width: 165pt; font-weight: 700; color: var(--ink); }
+  td.note { color: var(--ink); }
+  .flag { display: block; margin-top: 3pt; font-size: 8pt; color: var(--muted); }
+
+  .closing { margin-top: 20pt; }
+  .closing .label { margin-bottom: 5pt; }
+  .closing p { font-size: 9.5pt; }
+  .method { margin-top: 14pt; font-size: 9pt; color: var(--blue); }
+
+  /* ── Refs + footer ────────────────────────────────────── */
+  .refs {
+    position: absolute;
+    left: 42.4pt; right: 42.4pt; bottom: 46pt;
+    display: flex; gap: 60pt;
+    font-size: 8.5pt; color: var(--blue);
+  }
+  .foot {
+    position: absolute;
+    left: 42.4pt; right: 42.4pt; bottom: 22pt;
+    padding-top: 8pt;
+    border-top: 0.75pt solid var(--rule);
+    display: flex; justify-content: space-between;
+    font-size: 7.5pt; color: var(--muted);
+  }
+  .foot .sep { color: var(--rule); padding: 0 4pt; }
+  .foot .pages { font-family: Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace; }
+</style>
+</head>
+<body>
+
+{% macro header(eyebrow) %}
+  <div class="head">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 26 26">
+        <path d="M13 2 L24.5 23 L1.5 23 Z" fill="none" stroke="#101c30" stroke-width="2.6" stroke-linejoin="miter"/>
+        <path d="M10.2 13.6 L15.6 21.1 L4.8 21.1 Z" fill="#205eeb"/>
+      </svg>
+      <span class="brand-name">Sekura</span>
+    </div>
+    <div class="head-meta">
+      <div class="l1">Website Security</div>
+      <div class="l2">{{ eyebrow }}</div>
+    </div>
+  </div>
+{% endmacro %}
+
+{% macro block(cb) %}
+  {% if cb %}
+  <div class="block">
+    <div class="block-label">{{ cb.label }}<span class="sep">/</span>{{ cb.caption }}</div>
+    <pre>{% for line in cb.lines %}{{ line }}
+{% endfor %}</pre>
+  </div>
+  {% endif %}
+{% endmacro %}
+
+{% macro footer(sheet) %}
+  <div class="foot">
+    <div>
+      SEKURA<span class="sep">/</span>{{ plan.domain }}<span class="sep">/</span>Scanned {{ plan.scan_date }}<span class="sep">/</span>Passive assessment
+    </div>
+    <div class="pages">{{ '%02d'|format(sheet.page_no) }} / {{ '%02d'|format(plan.page_total) }}</div>
+  </div>
+{% endmacro %}
+
+
+{% for sheet in plan.sheets %}
+<div class="sheet">
+  <div class="spine"></div>
+  {{ header(sheet.eyebrow) }}
+
+  {# ── Page 1: owner brief ─────────────────────────────── #}
+  {% if sheet.kind == 'brief' %}
+    <div class="kicker">
+      {{ plan.domain|upper }}<span class="sep">/</span>Website Security Review
+    </div>
+    {% if plan.actions %}
+      <h1>{{ ['','One action.','Two actions.','Three actions.'][plan.actions|length] }}<br>One clear handoff.</h1>
+      <p class="standfirst">
+        {%- if plan.client_name %}{{ plan.client_name }}: forward this report{% else %}Forward this report{% endif %}
+        to your web developer and email provider. Ask them to confirm the plan and return the
+        verification results.
+      </p>
+      <div class="banner">
+        <div class="l1">Start here</div>
+        <div class="l2">{{ plan.start_here }}</div>
+      </div>
+      {% for action in plan.actions %}
+      <div class="action-row">
+        <div class="action-left">
+          <div class="action-band">{{ action.band }}</div>
+          <div class="action-num mono">{{ action.number }}</div>
+        </div>
+        <div class="action-body">
+          <div class="action-title">{{ action.headline }}</div>
+          <div class="action-text">{{ action.brief }}</div>
+          <div class="action-meta">{{ action.owner }}<span class="bar">|</span>Page {{ action.page }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    {% elif plan.rating_withheld %}
+      <h1>No actions.<br>Incomplete evidence.</h1>
+      <p class="standfirst">
+        This scan raised no finding that needs a change &mdash; but it did not collect enough evidence
+        to call the site clean either. Page {{ plan.page_total }} names the checks that came back empty.
+        Treat this as an unfinished scan, not a clean result.
+      </p>
+      <div class="banner">
+        <div class="l1">Start here</div>
+        <div class="l2">{{ plan.start_here }}</div>
+      </div>
+      <p class="empty-state">
+        {% if plan.rating_withheld %}Re-run the scan once the site is reachable for every check listed on
+        page {{ plan.page_total }}. Until then no rating is issued.{% else %}Keep the verification commands
+        from your previous report. Re-run this scan after any change to DNS, hosting or checkout.{% endif %}
+      </p>
+    {% else %}
+      <h1>No actions.<br>One clear record.</h1>
+      <p class="standfirst">
+        This scan produced no finding that needs a change from your web developer or email provider.
+        Page {{ plan.page_total }} states what the evidence supports and what it does not.
+      </p>
+      <div class="banner">
+        <div class="l1">Start here</div>
+        <div class="l2">{{ plan.start_here }}</div>
+      </div>
+      <p class="empty-state">
+        Keep the verification commands from your previous report. Re-run this scan after any change to
+        DNS, hosting or checkout.
+      </p>
+    {% endif %}
+
+    <div class="offer">
+      <div class="offer-q">Want Sekura to scope the work?</div>
+      <div class="offer-a">Reply with your developer copied in: {{ company.email }}</div>
+    </div>
+
+  {# ── Page 2: first action, in full ───────────────────── #}
+  {% elif sheet.kind == 'detail_full' %}
+    {% set action = sheet.actions[0] %}
+    <div class="kicker">
+      <span class="num">{{ action.number }}</span><span class="sep">/</span>{{ action.section_owner }}
+    </div>
+    <h1 class="tight">{{ action.detail_title }}</h1>
+    <div class="subkicker">{{ action.detail_kicker }}</div>
+    <p style="margin-top:16pt;">{{ action.detail_intro }}</p>
+
+    {{ block(action.observed) }}
+
+    <div class="plan">
+      <div class="label">Change plan</div>
+      {% for step in action.steps %}
+      <div class="step"><b>{{ step.title }}</b> {{ step.body }}</div>
+      {% endfor %}
+    </div>
+
+    {{ block(action.verify) }}
+
+    <div class="done">
+      <div class="label">Done when</div>
+      <p>{{ action.done_when }}</p>
+    </div>
+
+    {% if action.refs %}
+    <div class="refs">
+      {% for ref in action.refs %}<div>{{ ref.label }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+  {# ── Page 3: remaining actions, condensed ────────────── #}
+  {% elif sheet.kind == 'detail_compact' %}
+    <div class="kicker">
+      <span class="num">{{ sheet.actions|map(attribute='number')|join(' + ') }}</span><span class="sep">/</span>{{ sheet.section_owner }}
+    </div>
+    <h1 class="tight">{{ sheet.title }}</h1>
+    <div class="subkicker">{{ sheet.kicker }}</div>
+
+    {% for action in sheet.actions %}
+    <div class="unit">
+      <div class="unit-head">
+        <span class="num">{{ action.number }}</span><span class="sep">/</span><span class="name">{{ action.section_owner }}</span>
+      </div>
+      <div class="unit-title">{{ action.unit_title }}</div>
+      <p>{{ action.detail_intro }}</p>
+      {{ block(action.observed) }}
+      {% if action.steps %}
+      <p><span class="inline-label">Next:</span> {{ action.steps[0].body }}</p>
+      {% endif %}
+      <p><span class="inline-label">Done when:</span> {{ action.done_when }}</p>
+    </div>
+    {% endfor %}
+
+    {% set all_refs = [] %}
+    {% for action in sheet.actions %}{% for ref in action.refs %}{% if all_refs.append(ref) %}{% endif %}{% endfor %}{% endfor %}
+    {% if all_refs %}
+    <div class="refs">
+      {% for ref in all_refs[:3] %}<div>{{ ref.label }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+  {# ── Page 4: evidence + handoff ──────────────────────── #}
+  {% elif sheet.kind == 'evidence' %}
+    <div class="kicker">
+      Read-only assessment<span class="sep">/</span>Scope and limits
+    </div>
+    <h1 class="tight">What the evidence supports</h1>
+    <div class="subkicker">{{ plan.domain }}, scanned {{ plan.scan_date }}.</div>
+    <p style="margin-top:16pt;">{{ plan.withheld_reason }}</p>
+
+    <table>
+      <thead>
+        <tr><th>Area</th><th>Evidence in this scan</th></tr>
+      </thead>
+      <tbody>
+        {% for row in plan.evidence_rows %}
+        <tr>
+          <td class="area">{{ row.area }}</td>
+          <td class="note">
+            {{ row.note }}
+            {% if not row.complete %}<span class="flag">Incomplete &mdash; not counted as a pass.</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="closing">
+      <div class="label">Scope</div>
+      <p>{{ plan.scope }}</p>
+    </div>
+    <div class="closing">
+      <div class="label">Return with the fixes</div>
+      <p>
+        Send the finding, the person responsible, the change date, before and after evidence, and the
+        verification result.
+        {%- if plan.rating_withheld %} Re-run the incomplete checks before issuing a final rating.
+        {%- else %} Re-run this scan after the changes land to confirm the rating still holds.{% endif %}
+      </p>
+    </div>
+    <div class="method">Method: {{ company.methodology_url }}</div>
+  {% endif %}
+
+  {{ footer(sheet) }}
+</div>
+{% endfor %}
+
+</body>
+</html>
