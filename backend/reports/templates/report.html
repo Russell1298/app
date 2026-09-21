@@ -7,8 +7,36 @@
   /* ── Reset & base ─────────────────────────────────────── */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* ── Page geometry & running footer ───────────────────── */
+  @page {
+    size: A4;
+    margin: 16mm 16mm 17mm;
+    @bottom-left {
+      content: "Sekura  |  Confidential  |  {{ result.domain | replace('"', '') }}";
+      font-family: 'Inter', 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+      font-size: 7.5pt;
+      color: #94a3b8;
+      vertical-align: top;
+      padding-top: 5mm;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: 'Inter', 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+      font-size: 7.5pt;
+      color: #94a3b8;
+      vertical-align: top;
+      padding-top: 5mm;
+    }
+  }
+  /* The cover is full-bleed and carries no running footer. */
+  @page :first {
+    margin: 0;
+    @bottom-left  { content: none; }
+    @bottom-right { content: none; }
+  }
+
   body {
-    font-family: 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+    font-family: 'Inter', 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
     font-size: 10.5pt;
     line-height: 1.55;
     color: #1a202c;
@@ -25,6 +53,7 @@
     color: #ffffff;
     padding: 52px 56px 44px;
   }
+  .cover-spacer, .cover-spacer-top { display: none; }
   .cover-logo {
     font-size: 12pt;
     font-weight: 700;
@@ -208,8 +237,11 @@
   /* ── Scanner score cards ──────────────────────────────── */
   .score-cards { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
   .score-card {
-    flex: 1;
-    min-width: 90px;
+    /* Fixed 4-up so a 7-scanner run reads 4 + 3 at equal width rather than
+       wrapping into two rows of different-sized cards. */
+    flex: 0 0 auto;
+    width: calc((100% - 30px) / 4);
+    min-width: 0;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
@@ -324,13 +356,13 @@
     background: #f8fafc;
     border: 1px solid #e2e8f0;
     border-radius: 6px;
-    padding: 10px 13px;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 9pt;
+    border-left: 3px solid #0f2d5a;
+    padding: 11px 14px;
+    font-size: 9.5pt;
+    line-height: 1.6;
     color: #0f2d5a;
     white-space: pre-wrap;
     overflow-wrap: break-word;
-    word-break: break-all;
     margin-top: 4px;
   }
   .effort-badge {
@@ -402,7 +434,7 @@
   th { background: #f1f5f9; color: #475569; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 10px; text-align: left; border-bottom: 2px solid #e2e8f0; }
   td { padding: 7px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; word-break: break-all; }
   tr:last-child td { border-bottom: none; }
-  .mono { font-family: 'Courier New', Courier, monospace; }
+  .mono { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', 'Courier New', monospace; font-size: 8.5pt; }
 
   /* ── Status icons ─────────────────────────────────────── */
   .icon-pass { color: #16a34a; font-weight: 700; }
@@ -449,6 +481,31 @@
     .page-break { page-break-before: always; }
     .no-print { display: none !important; }
     a { color: inherit; text-decoration: none; }
+
+    /* Page margins are set by @page, so content blocks must not add their
+       own inset or every page ends up double-padded. */
+    .content { padding: 0; }
+    .doc-footer { padding-left: 0; padding-right: 0; }
+
+    /* Full-bleed cover: @page :first drops the margin, so the panel has to
+       claim the whole sheet and distribute its own blocks down the page. */
+    .cover {
+      min-height: 297mm;
+      padding: 30mm 22mm 20mm;
+      display: flex;
+      flex-direction: column;
+    }
+    .cover-spacer-top { display: block; flex: 0.8 1 auto; }
+    .cover-spacer     { display: block; flex: 1 1 auto; }
+    .cover-risk-row { margin-bottom: 0; }
+    .cover-toc { margin-bottom: 26px; }
+
+    /* Keep blocks whole and never strand a heading at the foot of a page. */
+    .finding, .score-card, .method-card, .attack-stat,
+    .roadmap-item, .callout { break-inside: avoid; }
+    tr { break-inside: avoid; }
+    .page-heading, .page-subheading, .section-title, h3 { break-after: avoid; }
+    table { break-before: avoid; }
   }
 
   /* ── Screen only ──────────────────────────────────────── */
@@ -490,6 +547,8 @@
     {{ company.name }}
   </div>
 
+  <div class="cover-spacer-top"></div>
+
   <div class="cover-label">Website Security Assessment</div>
   <div class="cover-domain">{{ result.domain }}</div>
 
@@ -511,6 +570,8 @@
   </div>
 
   <!-- Table of contents -->
+  <div class="cover-spacer"></div>
+
   <div class="cover-toc">
     <div class="cover-toc-heading">Contents</div>
     <div class="cover-toc-grid">
@@ -725,7 +786,7 @@
 <!-- ══════════════════════════════════════════════════════════
      SECTION 4 — ATTACK SURFACE OVERVIEW
 ══════════════════════════════════════════════════════════ -->
-<div class="content page-break">
+<div class="content">
 
   <div class="section">
     <div class="page-heading">Attack Surface Overview</div>
@@ -1178,7 +1239,7 @@
 <!-- ══════════════════════════════════════════════════════════
      SECTION 7 — SCANNER BREAKDOWN
 ══════════════════════════════════════════════════════════ -->
-<div class="content page-break">
+<div class="content">
 
   <div class="page-heading">Scanner Breakdown</div>
   <div class="page-subheading">Per-scanner security score and finding count</div>

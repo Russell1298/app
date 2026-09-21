@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     shared-mime-info \
     fonts-dejavu-core \
     fonts-liberation \
+    fonts-inter \
+    fonts-jetbrains-mono \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
