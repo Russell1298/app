@@ -73,6 +73,13 @@ _RULES: list[dict] = [
     {"source": "header_value", "key": "x-shopify-stage", "pattern": r".*",        "name": "Shopify",    "category": "cms", "confidence": "high"},
     {"source": "cookie",       "key": r"_shopify_",       "pattern": None,         "name": "Shopify",    "category": "cms", "confidence": "high"},
 
+    # SHOPLINE is a separate platform from Shopify and was previously absent,
+    # so its stores fingerprinted as nothing at all. Who owns the checkout, and
+    # therefore who can act on a checkout finding, depends on getting this right.
+    {"source": "html",         "key": r'myshopline\.(?:com|shop)', "pattern": None, "name": "SHOPLINE",  "category": "cms", "confidence": "high"},
+    {"source": "html",         "key": r'shoplineapp\.com', "pattern": None,        "name": "SHOPLINE",   "category": "cms", "confidence": "high"},
+    {"source": "html",         "key": r'shopline\.com',   "pattern": None,         "name": "SHOPLINE",   "category": "cms", "confidence": "medium"},
+
     {"source": "html",         "key": r'Squarespace',  "pattern": None,           "name": "Squarespace","category": "cms", "confidence": "medium"},
     {"source": "html",         "key": r'static\.squarespace\.com', "pattern": None,"name": "Squarespace","category": "cms","confidence": "high"},
 

@@ -53,6 +53,13 @@ _SRI_UNSUPPORTED_HOSTS = (
     "x.klarnacdn.net",
     "cdn.shopify.com",          # Shopify's own checkout assets
     "checkout.shopifycs.com",
+    # SHOPLINE, like Shopify, renders checkout itself. A merchant cannot edit
+    # the platform's own script tags, so telling them to add integrity= is
+    # advice they cannot act on.
+    "myshopline.com",
+    "myshopline.shop",
+    "shoplineapp.com",
+    "shoplineimg.com",
     # Fraud / risk bootstraps — deliberately rotating payloads.
     "songbird.cardinalcommerce.com",
     "centinelapi.cardinalcommerce.com",
@@ -68,6 +75,51 @@ _SRI_UNSUPPORTED_HOSTS = (
 def _sri_unsupported(src: str) -> bool:
     low = src.lower()
     return any(h in low for h in _SRI_UNSUPPORTED_HOSTS)
+
+
+# Evidence that a page actually takes payment details. A URL is not evidence:
+# on hosted platforms /checkout often redirects elsewhere, and /cart is usually
+# a basket page with no payment fields on it at all. Findings about "checkout
+# scripts" are only defensible on a page where one of these is present.
+# Evidence that a page actually takes payment details. A URL is not evidence:
+# on hosted platforms /checkout often redirects elsewhere, and /cart is usually
+# a basket page with no payment fields on it at all.
+#
+# Structural markers are a payment field, a payment iframe or a payment SDK -
+# things that only appear where money is taken. Wording is supporting evidence
+# only: "payment method" and "billing address" appear in basket footers, FAQs
+# and policy pages, so on its own it would re-create the false positive this
+# check exists to remove.
+_PAYMENT_MARKERS_STRUCTURAL: list[tuple[str, str]] = [
+    ("card_autocomplete",  r'autocomplete\s*=\s*["\']?cc-(?:number|exp|csc|name)'),
+    ("card_field_name",    r'(?:name|id)\s*=\s*["\']?(?:card[-_]?number|cardnumber|cc[-_]?num|creditcard)'),
+    ("cvv_field",          r'(?:name|id)\s*=\s*["\']?(?:cvv|cvc|csc|security[-_]?code)'),
+    ("payment_iframe",     r'<iframe[^>]+src\s*=\s*["\']?https?://(?:[^"\'>\s/]*\.)?'
+                           r'(?:stripe\.com|paypal\.com|braintreegateway\.com|squarecdn\.com|'
+                           r'klarna\.com|adyen\.com|checkout\.shopifycs\.com|myshopline\.com)'),
+    ("payment_sdk",        r'<script[^>]+src\s*=\s*["\']?https?://(?:js\.stripe\.com|'
+                           r'www\.paypal\.com/sdk|js\.braintreegateway\.com|web\.squarecdn\.com|'
+                           r'x\.klarnacdn\.net|checkout\.klarna\.com)'),
+]
+
+_PAYMENT_MARKERS_SUPPORTING: list[tuple[str, str]] = [
+    ("payment_wording",    r'(?i)\b(?:card number|expiry date|security code|payment method|'
+                           r'billing address)\b'),
+]
+
+
+def _payment_evidence(html: str) -> list[str]:
+    """
+    Return the payment markers present in *html*, or nothing at all.
+
+    A page qualifies only on a structural marker. Supporting wording is listed
+    alongside once it qualifies, and never qualifies a page by itself.
+    """
+    structural = [name for name, pattern in _PAYMENT_MARKERS_STRUCTURAL if re.search(pattern, html)]
+    if not structural:
+        return []
+    supporting = [name for name, pattern in _PAYMENT_MARKERS_SUPPORTING if re.search(pattern, html)]
+    return structural + supporting
 
 
 class _ScriptTagParser(HTMLParser):
@@ -123,7 +175,14 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
-async def _fetch_page(client: httpx.AsyncClient, url: str) -> str | None:
+async def _fetch_page(client: httpx.AsyncClient, url: str) -> tuple[str, str] | None:
+    """
+    Fetch *url* and return (final_url, html).
+
+    The final URL matters: redirects are followed, and on a hosted platform the
+    checkout usually lives on the platform's own hostname. Labelling those
+    scripts with the URL we requested would name a page that never served them.
+    """
     try:
         resp = await client.get(
             url,
@@ -135,7 +194,7 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str | None:
         )
         ct = resp.headers.get("content-type", "")
         if resp.status_code == 200 and "text/html" in ct:
-            return resp.text
+            return str(resp.url), resp.text
     except Exception:
         pass
     return None
@@ -144,6 +203,8 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str | None:
 def _build_findings(
     scripts_by_page: dict[str, list[dict]],
     domain: str,
+    payment_pages: dict[str, list[str]],
+    requested_by_final: dict[str, str],
 ) -> tuple[list[ScriptEntry], list[CheckoutScriptFinding]]:
     entries: list[ScriptEntry] = []
     findings: list[CheckoutScriptFinding] = []
@@ -154,7 +215,13 @@ def _build_findings(
     reported_patterns: set[str] = set()
 
     for page_url, raw_scripts in scripts_by_page.items():
-        is_checkout_page = any(p in page_url for p in ("/cart", "/checkout", "/bag"))
+        # Only a page carrying payment-field evidence counts as a checkout page.
+        payment_markers = payment_pages.get(page_url, [])
+        is_checkout_page = bool(payment_markers)
+        requested = requested_by_final.get(page_url, page_url)
+        page_evidence = f"Page: {page_url}"
+        if requested != page_url:
+            page_evidence = f"Requested: {requested}\nServed by: {page_url}"
 
         for script in raw_scripts:
             src: str | None = script["src"]
@@ -191,7 +258,7 @@ def _build_findings(
                         "replace it with one that does. Every resource on a store page must "
                         "load over an encrypted connection."
                     ),
-                    evidence=f"Page: {page_url}\nScript src: {src}",
+                    evidence=f"{page_evidence}\nScript src: {src}",
                     penalty=PENALTY["high"],
                 ))
 
@@ -212,7 +279,7 @@ def _build_findings(
                         "Check your plugins, theme files, and CMS for unexplained recent changes. "
                         "Rotate any admin credentials and consider restoring from a clean backup."
                     ),
-                    evidence=f"Page: {page_url}\nScript src: {src}",
+                    evidence=f"{page_evidence}\nScript src: {src}",
                     penalty=PENALTY["high"],
                 ))
 
@@ -245,7 +312,9 @@ def _build_findings(
                             "a written inventory of every script on your checkout pages, which PCI "
                             "DSS 6.4.3 requires."
                         ),
-                        evidence=f"Page: {page_url}\nScript src: {src}\nSRI: not supported by provider",
+                        evidence=(f"{page_evidence}\nScript src: {src}\n"
+                                  f"Payment page evidence: {', '.join(payment_markers)}\n"
+                                  "SRI: not supported by provider"),
                         penalty=PENALTY["low"],
                     ))
                 else:
@@ -265,7 +334,9 @@ def _build_findings(
                         "then set: integrity=\"sha384-<hash>\" crossorigin=\"anonymous\". "
                         "Consider a payment-focused CSP that blocks unauthorized script sources."
                     ),
-                    evidence=f"Page: {page_url}\nScript src: {src}\nSRI: absent",
+                    evidence=(f"{page_evidence}\nScript src: {src}\n"
+                           f"Payment page evidence: {', '.join(payment_markers)}\n"
+                           "SRI: absent"),
                     penalty=PENALTY["high"],
                 ))
 
@@ -292,7 +363,7 @@ def _build_findings(
                             "Consider a CSP that blocks all inline scripts."
                         ),
                         evidence=(
-                            f"Page: {page_url}\n"
+                            f"{page_evidence}\n"
                             f"Pattern: {pattern_name}\n"
                             f"Inline script content hash: {_content_hash(content)}"
                         ),
@@ -307,6 +378,8 @@ async def scan_checkout_scripts(domain: str) -> CheckoutScriptScanResult:
 
     scripts_by_page: dict[str, list[dict]] = {}
     pages_scanned: list[str] = []
+    payment_pages: dict[str, list[str]] = {}
+    requested_by_final: dict[str, str] = {}
 
     async with httpx.AsyncClient(verify=True) as client:
         results = await asyncio.gather(
@@ -315,11 +388,19 @@ async def scan_checkout_scripts(domain: str) -> CheckoutScriptScanResult:
         )
 
     for url, result in zip(urls, results):
-        if isinstance(result, str) and result:
-            pages_scanned.append(url)
-            scripts_by_page[url] = _parse_scripts(result)
+        if not isinstance(result, tuple):
+            continue
+        final_url, html = result
+        if not html or final_url in scripts_by_page:
+            continue            # a redirect can land several requests on one page
+        pages_scanned.append(final_url)
+        requested_by_final[final_url] = url
+        scripts_by_page[final_url] = _parse_scripts(html)
+        markers = _payment_evidence(html)
+        if markers:
+            payment_pages[final_url] = markers
 
-    entries, findings = _build_findings(scripts_by_page, domain)
+    entries, findings = _build_findings(scripts_by_page, domain, payment_pages, requested_by_final)
 
     critical_triggers: list[str] = []
     if any(f.finding_id == "script_from_ip" for f in findings):
@@ -341,6 +422,11 @@ async def scan_checkout_scripts(domain: str) -> CheckoutScriptScanResult:
         critical_triggers=critical_triggers,
         summary={
             "pages_scanned": len(pages_scanned),
+            # A page is only a checkout page when it carries payment evidence.
+            # Zero here means no payment page was reached, which is a gap in the
+            # scan, not a clean checkout.
+            "payment_pages_confirmed": len(payment_pages),
+            "payment_page_urls": sorted(payment_pages),
             "scripts_found": len(entries),
             "external_without_sri": sum(
                 1 for e in entries if not e.is_inline and not e.has_sri

@@ -6,30 +6,69 @@ scanner, not here, so a single check produces a single finding.
 """
 
 import asyncio
-import httpx
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 import dns.resolver
 import dns.exception
 import dns.rdatatype
 from models.scan import DNSRecord, DNSFinding, DNSScanResult, utc_now_iso
-from scanners import SCAN_HEADERS
 from scoring_config import PENALTY, scanner_score, risk_level
 
 # Cloud service patterns that indicate a potentially dangling CNAME target.
 _CLOUD_CNAME_PATTERNS = (
+    # AWS. ".s3.amazonaws.com" alone missed load balancers, CloudFront and
+    # Beanstalk, which is how three dangling payment hostnames went unreported.
     ".s3.amazonaws.com",
+    ".s3-website",
+    ".elb.amazonaws.com",
+    ".elasticbeanstalk.com",
+    ".cloudfront.net",
+    ".awsglobalaccelerator.com",
+    # Azure
     ".azurewebsites.net",
+    ".cloudapp.azure.com",
+    ".cloudapp.net",
+    ".blob.core.windows.net",
+    ".trafficmanager.net",
+    ".azureedge.net",
+    # Google
+    ".storage.googleapis.com",
+    ".appspot.com",
+    ".firebaseapp.com",
+    ".web.app",
+    # Platforms and static hosts
     ".github.io",
     ".herokuapp.com",
+    ".herokudns.com",
     ".netlify.app",
+    ".netlify.com",
     ".vercel.app",
+    ".pages.dev",
+    ".surge.sh",
+    ".bitbucket.io",
     ".ghost.io",
     ".shopify.com",
     ".fastly.net",
 )
 
+# Hostnames worth probing on every scan even when no subdomain list is
+# supplied. Payment-adjacent names are first because a stale record there is
+# the one a customer cannot afford to leave standing.
+_TAKEOVER_CANDIDATES = (
+    "checkout", "pay", "payment", "payments", "shop", "store", "cart",
+    "www", "api", "cdn", "assets", "static", "img", "media",
+    "mail", "blog", "help", "support", "admin", "portal",
+    "app", "staging", "dev", "test", "beta", "old", "legacy",
+)
+
 _RESOLVER = dns.resolver.Resolver()
 _RESOLVER.timeout = 5
 _RESOLVER.lifetime = 10
+
+# Takeover probing runs across many hostnames, so it gets a tighter budget.
+_TAKEOVER_RESOLVER = dns.resolver.Resolver()
+_TAKEOVER_RESOLVER.timeout = 3
+_TAKEOVER_RESOLVER.lifetime = 5
 
 
 def _query(name: str, rdtype: str) -> list[str]:
@@ -292,51 +331,118 @@ def _is_cloud_cname(target: str) -> bool:
     return any(pattern in tgt for pattern in _CLOUD_CNAME_PATTERNS)
 
 
-def _cname_responds(target: str) -> bool:
-    """Return True when the CNAME target returns an HTTP 200 response (i.e. not dangling)."""
-    for scheme in ("https", "http"):
-        url = f"{scheme}://{target}/"
+def _cname_target_resolves(target: str) -> bool:
+    """
+    Return True when *target* still exists in DNS.
+
+    This replaces an earlier HTTP check that treated any non-200 response as
+    evidence of a dangling record. That flagged live-but-private buckets,
+    WAF-protected endpoints and ordinary timeouts, which is exactly the kind
+    of false positive that discredits a report. A target that does not resolve
+    at all is unambiguous, needs no HTTP request, and keeps the scan passive.
+    """
+    for rdtype in ("A", "AAAA", "CNAME"):
         try:
-            resp = httpx.get(url, timeout=6, follow_redirects=True,
-                             headers=dict(SCAN_HEADERS))
-            if resp.status_code == 200:
-                return True
-        except Exception:
-            pass
+            _TAKEOVER_RESOLVER.resolve(target, rdtype)
+            return True
+        except (dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+            return True          # the name exists, it just has no record of this type
+        except dns.resolver.NXDOMAIN:
+            continue             # definitively absent; try the next type to be sure
+        except dns.exception.DNSException:
+            return True          # timeout or resolver trouble: never guess "dangling"
     return False
 
 
-def _check_subdomain_takeovers(subdomains: list[str]) -> list[DNSFinding]:
+def _wildcard_cname_target(domain: str) -> str | None:
     """
-    For each subdomain that has a CNAME pointing at a cloud service, verify
-    whether the CNAME target is reachable. If it returns 404/503 or no response,
-    flag it as a potential subdomain takeover.
+    Return the CNAME target a wildcard record answers with, if one exists.
+
+    Without this, a single "*.example.com" record makes every hostname we probe
+    look like its own dangling record. Testing a random name that nobody would
+    ever create tells us what the wildcard does before we judge anything else.
+    """
+    probe = f"sekura-wildcard-probe-{uuid.uuid4().hex[:12]}.{domain}"
+    targets = _cname_targets(probe)
+    return targets[0] if targets else None
+
+
+def _check_subdomain_takeovers(domain: str, subdomains: list[str] | None = None) -> list[DNSFinding]:
+    """
+    Look for records that CNAME to a cloud service which no longer exists.
+
+    Candidates are a built-in list of common hostnames plus anything the caller
+    supplies (e.g. from the certificate-transparency subdomain scanner). The
+    built-in list matters: this check previously ran only on a caller-supplied
+    list, and the orchestrator never supplied one, so it never ran at all.
+
+    A wildcard record is reported once, as the single record it is. Reporting
+    one misconfiguration as twenty findings is how a report loses its reader.
     """
     findings: list[DNSFinding] = []
-    for sub in subdomains:
-        targets = _cname_targets(sub)
-        for target in targets:
+
+    wildcard_target = _wildcard_cname_target(domain)
+    wildcard_dangling = bool(
+        wildcard_target
+        and _is_cloud_cname(wildcard_target)
+        and not _cname_target_resolves(wildcard_target)
+    )
+    if wildcard_dangling:
+        findings.append(DNSFinding(
+            check=f"Dangling wildcard DNS record: *.{domain}",
+            status="fail",
+            severity="high",
+            description=(
+                f"A wildcard record sends every unused subdomain of {domain} to "
+                f"{wildcard_target}, which no longer exists in DNS. Any hostname a customer "
+                f"or an attacker invents, including names like checkout.{domain}, resolves to "
+                "a service that is gone. Whether someone else can claim that name depends on "
+                "the provider, so this is a stale record to remove rather than a confirmed "
+                "takeover."
+            ),
+            remediation=(
+                f"Remove the wildcard CNAME for *.{domain} if the service behind it is retired, "
+                "and publish records only for the hostnames you actually use. If the wildcard is "
+                "still needed, point it at a host you control that returns a deliberate response. "
+                "Keep the previous DNS state for rollback."
+            ),
+            penalty=30,
+        ))
+
+    candidates = {f"{prefix}.{domain}" for prefix in _TAKEOVER_CANDIDATES}
+    candidates.update(subdomains or [])
+
+    def _inspect(sub: str) -> DNSFinding | None:
+        for target in _cname_targets(sub):
+            if wildcard_target and target == wildcard_target:
+                continue        # this is the wildcard answering, not its own record
             if not _is_cloud_cname(target):
                 continue
-            # The CNAME points at a cloud service — check whether it's claimed
-            if not _cname_responds(target):
-                findings.append(DNSFinding(
-                    check=f"Potential subdomain takeover: {sub}",
-                    status="fail",
-                    severity="high",
-                    description=(
-                        f"{sub} has a CNAME pointing to {target}, which appears to be "
-                        "an unclaimed cloud service. An attacker may be able to register "
-                        "this service and serve malicious content under your subdomain."
-                    ),
-                    remediation=(
-                        f"The subdomain {sub} points to {target}, a cloud service that no "
-                        "longer exists, so an attacker could claim it and host content on "
-                        f"your subdomain. Fix it by either deleting the CNAME record for {sub} "
-                        f"in your DNS, or re-claiming the service at {target} if you still need it."
-                    ),
-                    penalty=30,
-                ))
+            if _cname_target_resolves(target):
+                continue
+            return DNSFinding(
+                check=f"Dangling DNS record: {sub}",
+                status="fail",
+                severity="high",
+                description=(
+                    f"{sub} points to {target}, which no longer exists in DNS. The record "
+                    "outlived the service it was created for. Whether someone else can claim "
+                    "that name depends on the provider, so this is a stale record to remove "
+                    "rather than a confirmed takeover."
+                ),
+                remediation=(
+                    f"Delete the CNAME record for {sub} in your DNS if the service is retired. "
+                    f"If it is still needed, re-create it at {target} first, then confirm {sub} "
+                    "resolves before leaving it in place. Keep the previous DNS state for rollback."
+                ),
+                penalty=30,
+            )
+        return None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for finding in pool.map(_inspect, sorted(candidates)):
+            if finding is not None:
+                findings.append(finding)
     return findings
 
 
@@ -364,7 +470,7 @@ async def scan_dns(domain: str, subdomains: list[str] | None = None) -> DNSScanR
         spf_finding = _check_spf(domain)
         dmarc_record, dmarc_finding = _check_dmarc(domain)
         caa_record, caa_finding = _check_caa(domain)
-        takeover_findings = _check_subdomain_takeovers(subdomains or [])
+        takeover_findings = _check_subdomain_takeovers(domain, subdomains)
         return (
             a_record, a_finding, mx_record, mx_finding,
             ns_record, ns_finding, txt_record,

@@ -185,6 +185,23 @@ def _dmarc_value(result: FullScanResult) -> str | None:
     return None
 
 
+def _checkout_pages_confirmed(result: FullScanResult) -> int:
+    """
+    How many pages were confirmed to take payment details.
+
+    The scanner records this separately from pages_scanned because fetching
+    /cart successfully is not the same as reaching a checkout. Older stored
+    scans have no such key, so fall back to the page count they do carry.
+    """
+    checkout = result.checkout_scripts
+    if not checkout:
+        return 0
+    confirmed = checkout.summary.get("payment_pages_confirmed")
+    if confirmed is None:
+        return len(checkout.pages_scanned)
+    return int(confirmed)
+
+
 def _severity_word(severity: str | None) -> str:
     return {"high": "high", "medium": "medium", "low": "low"}.get(severity or "", "informational")
 
@@ -379,7 +396,7 @@ def _action_checkout(result: FullScanResult) -> Action | None:
         detail_title="Control the checkout script surface",
         detail_kicker=(
             f"Checkout scripts: {_severity_word(worst.severity)} priority / "
-            f"Pages read: {len(result.checkout_scripts.pages_scanned)}"
+            f"Payment pages confirmed: {_checkout_pages_confirmed(result)}"
         ),
         detail_intro=(
             "Scripts loaded on a page that handles payment details run with full access to that page. "
@@ -935,19 +952,20 @@ def _evidence_rows(result: FullScanResult) -> list[EvidenceRow]:
 
     # Secrets + checkout
     files = result.secrets.files_scanned if result.secrets else 0
-    pages = len(result.checkout_scripts.pages_scanned) if result.checkout_scripts else 0
+    pages = _checkout_pages_confirmed(result)
     if files == 0 or pages == 0:
         rows.append(EvidenceRow(
             "Secrets + checkout",
-            f"{files} JS file{'s' if files != 1 else ''} and {pages} checkout page{'s' if pages != 1 else ''} "
-            "were read. The evidence cannot support a clean result.",
+            f"{files} JS file{'s' if files != 1 else ''} read and {pages} page"
+            f"{'s' if pages != 1 else ''} confirmed to take payment details. "
+            "The evidence cannot support a clean result.",
             False,
         ))
     else:
         secret_hits = len(result.secrets.findings) if result.secrets else 0
         rows.append(EvidenceRow(
             "Secrets + checkout",
-            f"{files} JS files and {pages} checkout pages read; {secret_hits} credential "
+            f"{files} JS files read and {pages} payment pages confirmed; {secret_hits} credential "
             f"pattern{'s' if secret_hits != 1 else ''} matched.",
             True,
         ))
