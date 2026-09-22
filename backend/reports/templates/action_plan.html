@@ -133,11 +133,6 @@
 
   .empty-state { margin-top: 26pt; font-size: 11pt; color: var(--ink); }
 
-  /* ── Offer block (page 1) ─────────────────────────────── */
-  .offer { margin-top: 20pt; }
-  .offer-q { font-size: 11pt; font-weight: 700; color: var(--ink); }
-  .offer-a { margin-top: 5pt; font-size: 9.5pt; color: var(--blue); }
-
   /* ── Code / evidence blocks ───────────────────────────── */
   .block { margin-top: 16pt; background: var(--block); padding: 12pt 16pt 14pt 16pt; }
   .block-label {
@@ -318,11 +313,6 @@
         DNS, hosting or checkout.
       </p>
     {% endif %}
-
-    <div class="offer">
-      <div class="offer-q">Want Sekura to scope the work?</div>
-      <div class="offer-a">Reply with your developer copied in: {{ company.email }}</div>
-    </div>
 
   {# ── Page 2: first action, in full ───────────────────── #}
   {% elif sheet.kind == 'detail_full' %}
