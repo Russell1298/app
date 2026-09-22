@@ -259,7 +259,7 @@
       {{ plan.domain|upper }}<span class="sep">/</span>Website Security Review
     </div>
     {% if plan.actions %}
-      <h1>{{ ['','One action.','Two actions.','Three actions.'][plan.actions|length] }}<br>One clear handoff.</h1>
+      <h1>Action Plan</h1>
       <p class="standfirst">
         {%- if plan.client_name %}{{ plan.client_name }}: forward this report{% else %}Forward this report{% endif %}
         to your web developer and email provider. Ask them to confirm the plan and return the
@@ -283,7 +283,7 @@
       </div>
       {% endfor %}
     {% elif plan.rating_withheld %}
-      <h1>No actions.<br>Incomplete evidence.</h1>
+      <h1>Incomplete Scan</h1>
       <p class="standfirst">
         This scan raised no finding that needs a change &mdash; but it did not collect enough evidence
         to call the site clean either. Page {{ plan.page_total }} names the checks that came back empty.
@@ -299,7 +299,7 @@
         from your previous report. Re-run this scan after any change to DNS, hosting or checkout.{% endif %}
       </p>
     {% else %}
-      <h1>No actions.<br>One clear record.</h1>
+      <h1>Scan Summary</h1>
       <p class="standfirst">
         This scan produced no finding that needs a change from your web developer or email provider.
         Page {{ plan.page_total }} states what the evidence supports and what it does not.
@@ -320,7 +320,7 @@
     <div class="kicker">
       <span class="num">{{ action.number }}</span><span class="sep">/</span>{{ action.section_owner }}
     </div>
-    <h1 class="tight">{{ action.detail_title }}</h1>
+    <h1 class="tight">{{ action.unit_title }}</h1>
     <div class="subkicker">{{ action.detail_kicker }}</div>
     <p style="margin-top:16pt;">{{ action.detail_intro }}</p>
 
@@ -382,7 +382,7 @@
     <div class="kicker">
       Read-only assessment<span class="sep">/</span>Scope and limits
     </div>
-    <h1 class="tight">What the evidence supports</h1>
+    <h1 class="tight">Evidence Summary</h1>
     <div class="subkicker">{{ plan.domain }}, scanned {{ plan.scan_date }}.</div>
     <p style="margin-top:16pt;">{{ plan.withheld_reason }}</p>
 

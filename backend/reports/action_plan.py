@@ -1029,17 +1029,7 @@ def _start_here(actions: list[Action]) -> str:
 
 def _compact_heading(actions: list[Action]) -> tuple[str, str, str, str]:
     """Title, kicker, owner line and header topic for the condensed page."""
-    bands = {a.band for a in actions}
-    if BAND_VERIFY in bands and len(actions) > 1:
-        title = "Verify first. Then configure."
-    elif BAND_VERIFY in bands:
-        title = "Verify before you change anything."
-    elif bands == {BAND_NEXT_WINDOW}:
-        title = "Plan these for the next window."
-    elif len(actions) == 1:
-        title = actions[0].detail_title
-    else:
-        title = "Two more changes to hand over."
+    title = "Additional Actions"
 
     kicker = " / ".join(a.detail_kicker.split(" / ")[0] for a in actions)
 
