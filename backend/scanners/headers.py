@@ -8,7 +8,7 @@ absence, and quality of security-relevant headers.
 import re
 import httpx
 from models.scan import HeaderFinding, InformationLeakFinding, HeaderScanResult, utc_now_iso
-from scanners import SCAN_HEADERS
+from scanners import SCAN_HEADERS, BROWSER_SCAN_HEADERS, BLOCKED_STATUSES
 from scoring_config import PENALTY, scanner_score, risk_level
 
 _HSTS_MIN_AGE = 15_552_000  # 180 days per v2 spec
@@ -315,59 +315,63 @@ def _check_cookies(set_cookie_lines: list[str]) -> list[HeaderFinding]:
     return findings
 
 
+async def _fetch(domain: str, request_headers: dict[str, str]) -> httpx.Response:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, headers=request_headers) as client:
+        try:
+            return await client.get(f"https://{domain}")
+        except httpx.ConnectError:
+            return await client.get(f"http://{domain}")
+
+
 async def scan_headers(domain: str) -> HeaderScanResult:
-    url = f"https://{domain}"
-    headers_received: dict[str, str] = {}
-    set_cookie_lines: list[str] = []
-    redirect_history: list[httpx.Response] = []
+    response: httpx.Response | None = None
     fetch_error: str | None = None
-    scanned_url = url
-    body_text = ""
+    used_browser_ua = False
 
     try:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=10.0,
-            headers=dict(SCAN_HEADERS),
-        ) as client:
-            response = await client.get(url)
-            headers_received = dict(response.headers)
-            set_cookie_lines = response.headers.get_list("set-cookie")
-            scanned_url = str(response.url)
-            redirect_history = list(response.history)
-            body_text = response.text
-    except httpx.ConnectError:
-        try:
-            url = f"http://{domain}"
-            async with httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=10.0,
-                headers=dict(SCAN_HEADERS),
-            ) as client:
-                response = await client.get(url)
-                headers_received = dict(response.headers)
-                scanned_url = str(response.url)
-                redirect_history = list(response.history)
-                body_text = response.text
-        except httpx.RequestError as e:
-            fetch_error = str(e)
-            scanned_url = url
+        response = await _fetch(domain, dict(SCAN_HEADERS))
     except httpx.RequestError as e:
         fetch_error = str(e)
-        scanned_url = url
 
-    if fetch_error:
+    if response is None or response.status_code in BLOCKED_STATUSES:
+        try:
+            retry = await _fetch(domain, dict(BROWSER_SCAN_HEADERS))
+            if response is None or retry.status_code not in BLOCKED_STATUSES:
+                response, used_browser_ua, fetch_error = retry, True, None
+        except httpx.RequestError as e:
+            fetch_error = fetch_error or str(e)
+
+    # A refusal page is not the site. Grading its headers would report protections
+    # as missing that the real page may well set, so report the check as unverified.
+    if response is not None and response.status_code in BLOCKED_STATUSES:
+        fetch_error = (
+            f"The site refused the scan (HTTP {response.status_code}), so the headers a visitor "
+            "receives could not be observed."
+        )
+
+    if fetch_error or response is None:
         return HeaderScanResult(
             domain=domain,
-            scanned_url=scanned_url,
+            scanned_url=str(response.url) if response is not None else f"https://{domain}",
             scan_timestamp=utc_now_iso(),
             findings=[],
             information_leaks=[],
             risk_score=0,
             risk_level="low",
             critical_triggers=[],
-            summary={"error": fetch_error, "headers_checked": 0},
+            summary={
+                "error": fetch_error or "No response received.",
+                "verified": False,
+                "headers_checked": 0,
+                "http_status": response.status_code if response is not None else None,
+            },
         )
+
+    headers_received = dict(response.headers)
+    set_cookie_lines = response.headers.get_list("set-cookie")
+    scanned_url = str(response.url)
+    redirect_history = list(response.history)
+    body_text = response.text
 
     lower_headers = {k.lower(): v for k, v in headers_received.items()}
 
@@ -523,6 +527,9 @@ async def scan_headers(domain: str) -> HeaderScanResult:
         risk_level=level,
         critical_triggers=[],
         summary={
+            "verified": True,
+            "http_status": response.status_code,
+            "client": "browser" if used_browser_ua else "scanner",
             "total_headers_checked": len(REQUIRED_HEADERS),
             "missing": missing_count,
             "weak": weak_count,

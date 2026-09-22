@@ -935,7 +935,10 @@ def _evidence_rows(result: FullScanResult) -> list[EvidenceRow]:
     # Headers + public paths
     header_count = len(result.headers.findings)
     path_count = len(result.exposure.findings)
-    if header_count == 0 or path_count == 0:
+    header_error = (result.headers.summary or {}).get("error")
+    if header_error:
+        rows.append(EvidenceRow("Headers + public paths", f"Headers not verified. {header_error}", False))
+    elif header_count == 0 or path_count == 0:
         rows.append(EvidenceRow(
             "Headers + public paths",
             f"{header_count} header result{'s' if header_count != 1 else ''} and {path_count} path result"
