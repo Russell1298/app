@@ -495,7 +495,7 @@ async def scan_dns(domain: str, subdomains: list[str] | None = None) -> DNSScanR
     findings.extend(takeover_findings)
 
     critical_triggers: list[str] = []
-    if any(f.check.startswith("Potential subdomain takeover") for f in takeover_findings):
+    if any(f.check.startswith("Dangling") for f in takeover_findings):
         critical_triggers.append("subdomain_takeover")
 
     risk_score, level = _score(findings)

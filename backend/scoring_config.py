@@ -37,6 +37,7 @@ CRITICAL_CAPS: dict[str, int] = {
     "script_over_http_checkout": 80,
     "dns_resolver_inconsistency":88,
     "mx_points_to_ip":           82,
+    "subdomain_takeover":        75,
 }
 
 
