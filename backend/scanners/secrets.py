@@ -11,13 +11,12 @@ import httpx
 import asyncio
 from urllib.parse import urljoin, urlparse
 from models.scan import SecretFinding, SecretScanResult, utc_now_iso
-from scanners import SCAN_HEADERS
+from scanners.waf import Access, probe_access, waf_vendor
 from scoring_config import PENALTY, scanner_score, risk_level
 
 _TIMEOUT   = 8
 _MAX_JS    = 5
 _MAX_BYTES = 500_000
-_HEADERS   = dict(SCAN_HEADERS)
 
 _PATTERNS: list[tuple[str, str, str]] = [
     (r"AKIA[0-9A-Z]{16}",                                          "AWS Access Key ID",            "high"),
@@ -140,31 +139,30 @@ def _extract_js_urls(html: str, base_url: str) -> list[str]:
     return urls[:_MAX_JS]
 
 
-async def scan_secrets(domain: str) -> SecretScanResult:
-    base_url  = f"https://{domain}"
+async def scan_secrets(domain: str, access: Access | None = None) -> SecretScanResult:
+    access = access or await probe_access(domain)
     findings: list[SecretFinding] = []
     files_scanned = 0
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=_TIMEOUT, headers=_HEADERS) as client:
-        try:
-            resp = await client.get(base_url)
-            html = resp.text[:_MAX_BYTES]
-            files_scanned += 1
+    # Reading a WAF page instead of the site would report "no secrets" about
+    # content that was never seen, so a refused scan reads nothing at all.
+    if access.response is not None and not access.blocked:
+        base_url = str(access.response.url)
+        html = access.response.text[:_MAX_BYTES]
+        files_scanned += 1
 
-            findings += _scan_content(html, base_url, "html")
-            for m in re.finditer(r"<script[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE):
-                findings += _scan_content(m.group(1), base_url, "inline-script")
+        findings += _scan_content(html, base_url, "html")
+        for m in re.finditer(r"<script[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE):
+            findings += _scan_content(m.group(1), base_url, "inline-script")
 
-            js_urls = _extract_js_urls(html, base_url)
+        js_urls = _extract_js_urls(html, base_url)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=_TIMEOUT, headers=access.request_headers) as client:
             js_responses = await asyncio.gather(*[client.get(u) for u in js_urls], return_exceptions=True)
-            for url, js_resp in zip(js_urls, js_responses):
-                if isinstance(js_resp, Exception):
-                    continue
-                files_scanned += 1
-                findings += _scan_content(js_resp.text[:_MAX_BYTES], url, "javascript")
-
-        except httpx.RequestError:
-            pass
+        for url, js_resp in zip(js_urls, js_responses):
+            if isinstance(js_resp, Exception) or js_resp.status_code != 200 or waf_vendor(js_resp):
+                continue
+            files_scanned += 1
+            findings += _scan_content(js_resp.text[:_MAX_BYTES], url, "javascript")
 
     seen: set[tuple] = set()
     deduped: list[SecretFinding] = []
@@ -192,6 +190,7 @@ async def scan_secrets(domain: str) -> SecretScanResult:
         risk_level=level,
         critical_triggers=critical_triggers,
         summary={
+            **({"error": access.blocked, "verified": False} if access.blocked else {"verified": True}),
             "files_scanned": files_scanned,
             "secrets_found": len(deduped),
             "high": sum(1 for f in deduped if f.severity == "high"),

@@ -6,9 +6,8 @@ absence, and quality of security-relevant headers.
 """
 
 import re
-import httpx
 from models.scan import HeaderFinding, InformationLeakFinding, HeaderScanResult, utc_now_iso
-from scanners import SCAN_HEADERS, BROWSER_SCAN_HEADERS, BLOCKED_STATUSES
+from scanners.waf import Access, probe_access
 from scoring_config import PENALTY, scanner_score, risk_level
 
 _HSTS_MIN_AGE = 15_552_000  # 180 days per v2 spec
@@ -315,44 +314,16 @@ def _check_cookies(set_cookie_lines: list[str]) -> list[HeaderFinding]:
     return findings
 
 
-async def _fetch(domain: str, request_headers: dict[str, str]) -> httpx.Response:
-    async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, headers=request_headers) as client:
-        try:
-            return await client.get(f"https://{domain}")
-        except httpx.ConnectError:
-            return await client.get(f"http://{domain}")
+async def scan_headers(domain: str, access: Access | None = None) -> HeaderScanResult:
+    access = access or await probe_access(domain)
+    response = access.response
 
-
-async def scan_headers(domain: str) -> HeaderScanResult:
-    response: httpx.Response | None = None
-    fetch_error: str | None = None
-    used_browser_ua = False
-
-    try:
-        response = await _fetch(domain, dict(SCAN_HEADERS))
-    except httpx.RequestError as e:
-        fetch_error = str(e)
-
-    if response is None or response.status_code in BLOCKED_STATUSES:
-        try:
-            retry = await _fetch(domain, dict(BROWSER_SCAN_HEADERS))
-            if response is None or retry.status_code not in BLOCKED_STATUSES:
-                response, used_browser_ua, fetch_error = retry, True, None
-        except httpx.RequestError as e:
-            fetch_error = fetch_error or str(e)
-
-    # A refusal page is not the site. Grading its headers would report protections
-    # as missing that the real page may well set, so report the check as unverified.
-    if response is not None and response.status_code in BLOCKED_STATUSES:
-        fetch_error = (
-            f"The site refused the scan (HTTP {response.status_code}), so the headers a visitor "
-            "receives could not be observed."
-        )
-
-    if fetch_error or response is None:
+    # A WAF or refusal page is not the site. Grading its headers would report
+    # protections as missing that the real page may well set.
+    if access.blocked or response is None:
         return HeaderScanResult(
             domain=domain,
-            scanned_url=str(response.url) if response is not None else f"https://{domain}",
+            scanned_url=f"https://{domain}",
             scan_timestamp=utc_now_iso(),
             findings=[],
             information_leaks=[],
@@ -360,13 +331,13 @@ async def scan_headers(domain: str) -> HeaderScanResult:
             risk_level="low",
             critical_triggers=[],
             summary={
-                "error": fetch_error or "No response received.",
+                "error": access.blocked or "No response received.",
                 "verified": False,
                 "headers_checked": 0,
-                "http_status": response.status_code if response is not None else None,
             },
         )
 
+    used_browser_ua = access.client == "browser"
     headers_received = dict(response.headers)
     set_cookie_lines = response.headers.get_list("set-cookie")
     scanned_url = str(response.url)

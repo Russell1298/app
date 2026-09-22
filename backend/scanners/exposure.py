@@ -18,11 +18,10 @@ import httpx
 import asyncio
 from collections import defaultdict
 from models.scan import ExposureFinding, ExposureScanResult, utc_now_iso
-from scanners import SCAN_HEADERS
+from scanners.waf import Access, probe_access, waf_vendor
 from scoring_config import PENALTY, scanner_score, risk_level
 
 _TIMEOUT = 8
-_HEADERS = dict(SCAN_HEADERS)
 
 _PROBES: list[dict] = [
     {
@@ -286,7 +285,7 @@ async def _detect_catch_all(client: httpx.AsyncClient, base_url: str) -> bool:
             resp = await client.get(base_url.rstrip("/") + path)
         except httpx.RequestError:
             continue
-        if resp.status_code == 200:
+        if resp.status_code == 200 and not waf_vendor(resp):
             return True
     return False
 
@@ -296,6 +295,7 @@ async def _probe(
     base_url: str,
     probe: dict,
     catch_all: bool = False,
+    refused: list[str] | None = None,
 ) -> ExposureFinding | None:
     url = base_url.rstrip("/") + probe["path"]
     try:
@@ -304,6 +304,13 @@ async def _probe(
         return None
 
     status_code = resp.status_code
+
+    # A WAF answer or rate limit says nothing about the path itself: not that it is
+    # exposed, and not that the site's own configuration blocks it.
+    if status_code == 429 or waf_vendor(resp):
+        if refused is not None:
+            refused.append(probe["path"])
+        return None
 
     if status_code == 200:
         body = resp.text[:4000]
@@ -373,12 +380,27 @@ async def _check_directory_listing(client: httpx.AsyncClient, base_url: str) -> 
     return None
 
 
-async def scan_exposure(domain: str) -> ExposureScanResult:
+async def scan_exposure(domain: str, access: Access | None = None) -> ExposureScanResult:
     base_url = f"https://{domain}"
+    access = access or await probe_access(domain)
 
-    async with httpx.AsyncClient(follow_redirects=False, timeout=_TIMEOUT, headers=_HEADERS) as client:
+    # The site already refused the scan. Probing further proves nothing and keeps
+    # knocking on a door that said no.
+    if access.blocked:
+        return ExposureScanResult(
+            domain=domain,
+            scan_timestamp=utc_now_iso(),
+            findings=[],
+            risk_score=0,
+            risk_level="low",
+            critical_triggers=[],
+            summary={"error": access.blocked, "verified": False, "paths_checked": 0},
+        )
+
+    async with httpx.AsyncClient(follow_redirects=False, timeout=_TIMEOUT, headers=access.request_headers) as client:
         catch_all = await _detect_catch_all(client, base_url)
-        tasks = [_probe(client, base_url, p, catch_all) for p in _PROBES]
+        refused: list[str] = []
+        tasks = [_probe(client, base_url, p, catch_all, refused) for p in _PROBES]
         tasks.append(_check_directory_listing(client, base_url))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -439,7 +461,12 @@ async def scan_exposure(domain: str) -> ExposureScanResult:
         risk_level=level,
         critical_triggers=critical_triggers,
         summary={
-            "paths_checked": len(_PROBES) + 1,
+            "verified": True,
+            "client": access.client,
+            "paths_checked": len(_PROBES) + 1 - len(refused),
+            # Paths the site's protection answered instead of the site. No claim is
+            # made about them either way, so coverage is partial when this is non-empty.
+            "waf_refused": sorted(refused),
             "exposed": len(exposed),
             "informational": len(info),
             "catch_all_routing": catch_all,

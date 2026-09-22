@@ -18,6 +18,7 @@ from scanners.subdomain import scan_subdomains
 from scanners.secrets import scan_secrets
 from scanners.checkout_scripts import scan_checkout_scripts
 from scanners.dns_hijack import scan_dns_hijack
+from scanners.waf import Access, probe_access
 from reports.generator import build_full_report
 from netguard import assert_public_host_async
 from models.scan import (
@@ -55,9 +56,9 @@ def _dns_hijack_fallback(domain: str) -> DNSHijackScanResult:
     )
 
 
-async def _safe_checkout(domain: str) -> CheckoutScriptScanResult:
+async def _safe_checkout(domain: str, access: Access) -> CheckoutScriptScanResult:
     try:
-        return await scan_checkout_scripts(domain)
+        return await scan_checkout_scripts(domain, access)
     except Exception as exc:
         log.warning("checkout_scripts failed for %s: %s", domain, exc)
         return _checkout_fallback(domain)
@@ -76,25 +77,30 @@ async def run_full_scan(domain: str) -> FullScanResult:
     # before any scanner makes an outbound request to them.
     await assert_public_host_async(domain)
 
+    async def _page_scanners():
+        # One homepage probe decides whether the site's real pages are reachable.
+        # Every page-reading scanner uses it, so none of them grades a WAF page.
+        access = await probe_access(domain)
+        return await asyncio.gather(
+            scan_headers(domain, access),
+            scan_exposure(domain, access),
+            scan_secrets(domain, access),
+            _safe_checkout(domain, access),
+        )
+
     (
-        headers_result,
+        (headers_result, exposure_result, secrets_result, checkout_result),
         dns_result,
         ssl_result,
-        exposure_result,
         fingerprint_result,
         subdomain_result,
-        secrets_result,
-        checkout_result,
         dns_hijack_result,
     ) = await asyncio.gather(
-        scan_headers(domain),
+        _page_scanners(),
         scan_dns(domain),
         scan_ssl(domain),
-        scan_exposure(domain),
         scan_fingerprint(domain),
         scan_subdomains(domain),
-        scan_secrets(domain),
-        _safe_checkout(domain),
         _safe_dns_hijack(domain),
     )
 

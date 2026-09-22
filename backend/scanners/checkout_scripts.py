@@ -16,7 +16,7 @@ from models.scan import (
     ScriptEntry, CheckoutScriptFinding, CheckoutScriptScanResult, utc_now_iso
 )
 from scoring_config import PENALTY, scanner_score, risk_level
-from scanners import USER_AGENT
+from scanners.waf import Access, probe_access, waf_vendor
 
 _CHECKOUT_PATHS = ["/cart", "/checkout", "/shop/cart", "/bag"]
 
@@ -184,16 +184,10 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> tuple[str, str] | 
     scripts with the URL we requested would name a page that never served them.
     """
     try:
-        resp = await client.get(
-            url,
-            timeout=10,
-            follow_redirects=True,
-            headers={
-                "User-Agent": USER_AGENT
-            },
-        )
+        resp = await client.get(url, timeout=10, follow_redirects=True)
         ct = resp.headers.get("content-type", "")
-        if resp.status_code == 200 and "text/html" in ct:
+        # A WAF challenge is not the checkout; its scripts are the vendor's.
+        if resp.status_code == 200 and "text/html" in ct and not waf_vendor(resp):
             return str(resp.url), resp.text
     except Exception:
         pass
@@ -373,7 +367,8 @@ def _build_findings(
     return entries, findings
 
 
-async def scan_checkout_scripts(domain: str) -> CheckoutScriptScanResult:
+async def scan_checkout_scripts(domain: str, access: Access | None = None) -> CheckoutScriptScanResult:
+    access = access or await probe_access(domain)
     urls = [f"https://{domain}/"] + [f"https://{domain}{p}" for p in _CHECKOUT_PATHS]
 
     scripts_by_page: dict[str, list[dict]] = {}
@@ -381,11 +376,13 @@ async def scan_checkout_scripts(domain: str) -> CheckoutScriptScanResult:
     payment_pages: dict[str, list[str]] = {}
     requested_by_final: dict[str, str] = {}
 
-    async with httpx.AsyncClient(verify=True) as client:
-        results = await asyncio.gather(
-            *[_fetch_page(client, url) for url in urls],
-            return_exceptions=True,
-        )
+    results: list = []
+    if not access.blocked:
+        async with httpx.AsyncClient(verify=True, headers=access.request_headers) as client:
+            results = await asyncio.gather(
+                *[_fetch_page(client, url) for url in urls],
+                return_exceptions=True,
+            )
 
     for url, result in zip(urls, results):
         if not isinstance(result, tuple):
@@ -421,6 +418,7 @@ async def scan_checkout_scripts(domain: str) -> CheckoutScriptScanResult:
         risk_level=risk_level(score),
         critical_triggers=critical_triggers,
         summary={
+            **({"error": access.blocked, "verified": False} if access.blocked else {"verified": True}),
             "pages_scanned": len(pages_scanned),
             # A page is only a checkout page when it carries payment evidence.
             # Zero here means no payment page was reached, which is a gap in the

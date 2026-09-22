@@ -265,6 +265,9 @@ class FullScanResult(BaseModel):
     overall_risk_score: int
     overall_risk_level: Literal["low", "medium", "high", "critical"]
     top_findings: list[dict]
+    # Scanner name -> why its result could not be verified (e.g. a WAF refused the
+    # scan). Those scanners are excluded from overall_risk_score.
+    unverified: dict[str, str] = {}
     paid: bool = False
 
 

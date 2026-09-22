@@ -935,9 +935,18 @@ def _evidence_rows(result: FullScanResult) -> list[EvidenceRow]:
     # Headers + public paths
     header_count = len(result.headers.findings)
     path_count = len(result.exposure.findings)
-    header_error = (result.headers.summary or {}).get("error")
-    if header_error:
-        rows.append(EvidenceRow("Headers + public paths", f"Headers not verified. {header_error}", False))
+    page_error = (result.headers.summary or {}).get("error") or (result.exposure.summary or {}).get("error")
+    waf_refused = (result.exposure.summary or {}).get("waf_refused") or []
+    if page_error:
+        rows.append(EvidenceRow("Headers + public paths", f"Not verified. {page_error}", False))
+    elif waf_refused:
+        rows.append(EvidenceRow(
+            "Headers + public paths",
+            f"{header_count} headers checked. The site's protection answered {len(waf_refused)} path "
+            f"request{'s' if len(waf_refused) != 1 else ''} in place of the site ({', '.join(waf_refused[:4])}), "
+            "so no claim is made about those paths.",
+            False,
+        ))
     elif header_count == 0 or path_count == 0:
         rows.append(EvidenceRow(
             "Headers + public paths",
@@ -956,7 +965,10 @@ def _evidence_rows(result: FullScanResult) -> list[EvidenceRow]:
     # Secrets + checkout
     files = result.secrets.files_scanned if result.secrets else 0
     pages = _checkout_pages_confirmed(result)
-    if files == 0 or pages == 0:
+    secrets_error = (result.secrets.summary or {}).get("error") if result.secrets else None
+    if secrets_error:
+        rows.append(EvidenceRow("Secrets + checkout", f"Not verified. {secrets_error}", False))
+    elif files == 0 or pages == 0:
         rows.append(EvidenceRow(
             "Secrets + checkout",
             f"{files} JS file{'s' if files != 1 else ''} read and {pages} page"

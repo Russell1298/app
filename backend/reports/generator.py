@@ -17,6 +17,18 @@ from models.scan import (
 from scoring_config import SCANNER_WEIGHTS, CRITICAL_CAPS, risk_level
 
 
+def _verified(result) -> bool:
+    return (result.summary or {}).get("verified") is not False
+
+
+def _unverified(**results) -> dict[str, str]:
+    return {
+        name: (r.summary or {}).get("error") or "Not verified."
+        for name, r in results.items()
+        if r is not None and not _verified(r)
+    }
+
+
 def _weighted_score(
     headers: HeaderScanResult,
     dns: DNSScanResult,
@@ -26,18 +38,20 @@ def _weighted_score(
     checkout_scripts: CheckoutScriptScanResult | None = None,
     dns_hijack: DNSHijackScanResult | None = None,
 ) -> int:
-    raw = (
-        ssl.risk_score      * SCANNER_WEIGHTS["ssl"] +
-        headers.risk_score  * SCANNER_WEIGHTS["headers"] +
-        dns.risk_score      * SCANNER_WEIGHTS["dns"] +
-        exposure.risk_score * SCANNER_WEIGHTS["exposure"]
-    )
-    if secrets:
-        raw += secrets.risk_score * SCANNER_WEIGHTS["secrets"]
-    if checkout_scripts:
-        raw += checkout_scripts.risk_score * SCANNER_WEIGHTS["checkout_scripts"]
-    if dns_hijack:
-        raw += dns_hijack.risk_score * SCANNER_WEIGHTS["dns_hijack"]
+    parts = [
+        ("ssl", ssl), ("headers", headers), ("dns", dns), ("exposure", exposure),
+        ("secrets", secrets), ("checkout_scripts", checkout_scripts), ("dns_hijack", dns_hijack),
+    ]
+    present = [(name, r) for name, r in parts if r is not None]
+    total_weight = sum(SCANNER_WEIGHTS[name] for name, _ in present)
+    # An unverified scanner's 0 means "not seen", not "no risk". Averaging it in
+    # would make a site the scan could not reach look safer, so it is left out and
+    # the verified scanners stand in for the full weight.
+    verified = [(name, r) for name, r in present if _verified(r)]
+    verified_weight = sum(SCANNER_WEIGHTS[name] for name, _ in verified)
+    raw = sum(r.risk_score * SCANNER_WEIGHTS[name] for name, r in verified)
+    if verified_weight:
+        raw *= total_weight / verified_weight
     score = min(100, round(raw))
 
     # Collect all critical triggers emitted by scanners
@@ -219,5 +233,8 @@ def build_full_report(
         dns_hijack=dns_hijack,
         overall_risk_score=score,
         overall_risk_level=risk_level(score),
+        unverified=_unverified(
+            headers=headers, exposure=exposure, secrets=secrets, checkout_scripts=checkout_scripts,
+        ),
         top_findings=_top_findings(headers, dns, ssl, exposure, secrets, checkout_scripts, dns_hijack),
     )
