@@ -55,16 +55,22 @@ git push origin main
 
 ## Backend — Local Dev with Docker Compose
 
+Use the `docker compose` subcommand (space, not hyphen) — this is the Compose V2
+plugin bundled with modern Docker installs. The standalone `docker-compose`
+binary is a separate, older package that isn't installed here and doesn't need
+to be; if a command starting with `docker-compose` (hyphen) ever fails with
+"command not found," that's the tell, not a broken environment.
+
 ```bash
 # Start everything (from /home/user/app)
-docker-compose up
+docker compose up
 
 # Restart after .env changes
-docker-compose down
-docker-compose up
+docker compose down
+docker compose up
 
 # Rebuild after Dockerfile/dependency changes
-docker-compose up --build
+docker compose up --build
 ```
 
 Services:

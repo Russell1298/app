@@ -32,11 +32,16 @@ in `docker-compose.yml` points at the `db` service hostname (`db`), not
 
 ## Starting the backend
 
+Use the `docker compose` subcommand (space, not hyphen) — the Compose V2 plugin
+bundled with modern Docker. The standalone `docker-compose` binary is a
+separate, older package and is not installed here; `docker-compose: command
+not found` means "use the space form," not "install something."
+
 ```bash
 cd /home/user/app
-docker-compose up            # foreground, logs visible
+docker compose up            # foreground, logs visible
 # or
-docker-compose up -d         # detached
+docker compose up -d         # detached
 ```
 
 Services started:
@@ -53,8 +58,8 @@ not the `frontend/` folder in this repo. Don't confuse the two.
 ### After changing `.env`
 
 ```bash
-docker-compose down
-docker-compose up
+docker compose down
+docker compose up
 ```
 
 Env vars are read at container start — editing `.env` alone does nothing until
@@ -63,7 +68,7 @@ you restart.
 ### After changing `backend/Dockerfile` or `backend/requirements.txt`
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 `backend/` is bind-mounted into the `api` container for live reload
@@ -140,17 +145,21 @@ reports from the live site.
 ## Common ways this gets broken (and how to avoid it)
 
 1. **Editing `ALLOWED_ORIGINS` and forgetting to restart Docker.** Env changes
-   need `docker-compose down && docker-compose up`.
-2. **Forgetting the ngrok header in a new/edited fetch call** in the Lovable
+   need `docker compose down && docker compose up`.
+2. **Typing `docker-compose` (hyphen) instead of `docker compose` (space).**
+   This machine only has the Compose V2 plugin, not the standalone binary —
+   the hyphenated form always fails with "command not found." It's not a
+   missing install, just the wrong invocation.
+3. **Forgetting the ngrok header in a new/edited fetch call** in the Lovable
    frontend — causes silent CORS/JSON failures.
-3. **Letting the ngrok URL go stale** after a restart — frontend keeps
+4. **Letting the ngrok URL go stale** after a restart — frontend keeps
    pointing at a dead tunnel.
-4. **Committing `.env`.** It's gitignored for a reason — real DB credentials
+5. **Committing `.env`.** It's gitignored for a reason — real DB credentials
    and (once added) Stripe/Resend secrets live there.
-5. **Assuming `DATABASE_URL=localhost`.** Inside Docker Compose the Postgres
+6. **Assuming `DATABASE_URL=localhost`.** Inside Docker Compose the Postgres
    hostname is `db`, not `localhost`. Only override to `localhost` if running
    the API outside Docker entirely.
-6. **Running `uvicorn` directly without Docker** and expecting it to just
+7. **Running `uvicorn` directly without Docker** and expecting it to just
    work — it won't have Postgres reachable unless `DATABASE_URL` is manually
    pointed at a running Postgres instance.
 
@@ -160,6 +169,6 @@ reports from the live site.
 
 ```bash
 curl http://localhost:8000/docs   # FastAPI auto docs — confirms api container is up
-docker-compose ps                 # confirms all 3 services are running/healthy
-docker-compose logs api --tail 50 # recent backend logs
+docker compose ps                 # confirms all 3 services are running/healthy
+docker compose logs api --tail 50 # recent backend logs
 ```
