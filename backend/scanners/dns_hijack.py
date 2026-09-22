@@ -2,7 +2,11 @@
 DNS hijacking detection scanner.
 
 Checks for indicators that a domain's DNS has been silently tampered with:
-- Cross-resolver inconsistency (A records differ across Google, Cloudflare, Quad9)
+- Cross-resolver inconsistency (A records differ across Google, Cloudflare, Quad9),
+  corroborated against IP ownership (ASN) before it is treated as hijacking —
+  GeoDNS/anycast CDNs (Cloudflare, Akamai, Fastly, ...) legitimately hand different
+  resolvers different edge IPs, and without this check that is indistinguishable
+  from a real hijack.
 - Fast-flux DNS (very low TTL paired with many IPs)
 - MX records pointing to bare IP addresses (never legitimate)
 - DNSSEC absence (attackers disable it before hijacking)
@@ -66,6 +70,54 @@ def _is_bare_ip(value: str) -> bool:
         return False
 
 
+_ASN_LOOKUP_TIMEOUT = 2
+_ASN_LOOKUP_LIFETIME = 3
+_ASN_LOOKUP_WAIT = 5
+_MAX_ASN_LOOKUPS = 10
+
+
+def _asn_for_ip(ip: str) -> str | None:
+    """
+    Look up the announcing ASN for an IPv4 address via Team Cymru's public DNS
+    service — a passive TXT query, same trust model as the rest of this file.
+    Returns None on any failure; callers must treat that as "unknown", not "no ASN".
+    """
+    try:
+        octets = ip.split(".")
+        if len(octets) != 4:
+            return None
+        reversed_ip = ".".join(reversed(octets))
+        resolver = dns.resolver.Resolver()
+        resolver.nameservers = ["8.8.8.8"]
+        resolver.timeout = _ASN_LOOKUP_TIMEOUT
+        resolver.lifetime = _ASN_LOOKUP_LIFETIME
+        answers = resolver.resolve(f"{reversed_ip}.origin.asn.cymru.com", "TXT")
+        text = str(answers[0]).strip('"')
+        asn = text.split("|", 1)[0].strip()
+        return asn or None
+    except Exception:
+        return None
+
+
+def _asns_for_ips(ips: list[str]) -> dict[str, str]:
+    """Resolve ASNs for a small set of IPs concurrently, best-effort."""
+    ips = ips[:_MAX_ASN_LOOKUPS]
+    if not ips:
+        return {}
+    result: dict[str, str] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(ips)) as pool:
+        futures = {pool.submit(_asn_for_ip, ip): ip for ip in ips}
+        for future in concurrent.futures.as_completed(futures, timeout=_ASN_LOOKUP_WAIT):
+            ip = futures[future]
+            try:
+                asn = future.result()
+                if asn:
+                    result[ip] = asn
+            except Exception:
+                pass
+    return result
+
+
 def _check_resolver_consistency(domain: str) -> tuple[dict[str, list[str]], DNSHijackFinding]:
     resolver_results: dict[str, list[str]] = {}
 
@@ -111,22 +163,68 @@ def _check_resolver_consistency(domain: str) -> tuple[dict[str, list[str]], DNSH
     details = "; ".join(
         f"{name}: {', '.join(ips)}" for name, ips in resolver_results.items()
     )
+
+    # Resolvers disagreeing is not itself evidence of tampering — GeoDNS/anycast
+    # CDNs hand different resolvers different edge IPs as a matter of course.
+    # Corroborate with who actually owns each IP before calling this a hijack.
+    all_ips = sorted({ip for ips in resolver_results.values() for ip in ips})
+    asns = _asns_for_ips(all_ips)
+    distinct_asns = set(asns.values())
+
+    if asns and len(asns) == len(all_ips) and len(distinct_asns) == 1:
+        only_asn = next(iter(distinct_asns))
+        return resolver_results, DNSHijackFinding(
+            check="Cross-resolver consistency",
+            status="info",
+            severity=None,
+            description=(
+                f"Resolvers returned different IPs for {domain}, but every IP belongs to the "
+                f"same network operator (ASN {only_asn}). This is normal GeoDNS/anycast load "
+                "balancing across that provider's edge locations, not DNS tampering. "
+                f"Observed: {details}"
+            ),
+            remediation=None,
+            penalty=0,
+        )
+
+    if len(distinct_asns) > 1:
+        return resolver_results, DNSHijackFinding(
+            check="Cross-resolver consistency",
+            status="fail",
+            severity="high",
+            description=(
+                f"DNS resolvers disagree on the IP address for {domain}, and the differing IPs "
+                f"belong to different, unrelated network operators (ASNs: {', '.join(sorted(distinct_asns))}). "
+                "Normal CDN load balancing does not cross network operators — resolvers pointing "
+                "at entirely different providers for the same domain can indicate DNS cache "
+                f"poisoning, BGP hijacking, or a compromised DNS provider. Observed: {details}"
+            ),
+            remediation=(
+                "Compare your DNS registrar's published records against what each resolver "
+                "returns. If you made no recent DNS changes, contact your registrar and DNS "
+                "provider immediately to investigate unauthorized modifications. Enable DNSSEC "
+                "so any future tampering becomes detectable."
+            ),
+            penalty=PENALTY["high"],
+        )
+
+    # ASN lookup didn't return enough to confirm either way — surface it without
+    # the "hijacked" claim, since we don't have the evidence to back that up.
     return resolver_results, DNSHijackFinding(
         check="Cross-resolver consistency",
-        status="fail",
-        severity="high",
+        status="warn",
+        severity="medium",
         description=(
-            f"DNS resolvers disagree on the IP address for {domain}. "
-            "This can indicate DNS cache poisoning, BGP hijacking, or a compromised "
-            f"DNS provider. Observed: {details}"
+            f"DNS resolvers returned different IPs for {domain}, and ownership of those IPs "
+            "could not be confirmed well enough to rule out normal CDN/GeoDNS routing. This may "
+            f"be legitimate load balancing or may indicate DNS tampering. Observed: {details}"
         ),
         remediation=(
-            "Compare your DNS registrar's published records against what each resolver "
-            "returns. If you made no recent DNS changes, contact your registrar and DNS "
-            "provider immediately to investigate unauthorized modifications. Enable DNSSEC "
-            "so any future tampering becomes detectable."
+            "Confirm with your DNS or hosting provider that all of the IPs listed above are "
+            "ones they control. If any are unfamiliar, treat this as a possible compromise and "
+            "contact your DNS provider."
         ),
-        penalty=PENALTY["high"],
+        penalty=PENALTY["medium"],
     )
 
 
