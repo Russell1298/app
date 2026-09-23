@@ -713,7 +713,8 @@ def _action_caa(result: FullScanResult) -> Action | None:
 
 
 def _action_headers(result: FullScanResult) -> Action | None:
-    missing = [f for f in result.headers.findings if f.status in ("missing", "weak")]
+    missing = [f for f in result.headers.findings
+               if f.status in ("missing", "weak") and not f.platform_controlled]
     if not missing:
         return None
     rank = {"high": 3, "medium": 2, "low": 1}
@@ -856,7 +857,7 @@ def _action_dnssec(result: FullScanResult) -> Action | None:
 
 
 def _action_info_leak(result: FullScanResult) -> Action | None:
-    leaks = result.headers.information_leaks
+    leaks = [l for l in result.headers.information_leaks if not l.platform_controlled]
     if not leaks:
         return None
     return Action(
@@ -990,11 +991,11 @@ def _evidence_rows(result: FullScanResult) -> list[EvidenceRow]:
         ))
     else:
         exposed = sum(1 for f in result.exposure.findings if f.exposed)
-        rows.append(EvidenceRow(
-            "Headers + public paths",
-            f"{header_count} headers checked; {path_count} paths requested, {exposed} responded.",
-            True,
-        ))
+        note = f"{header_count} headers checked; {path_count} paths requested, {exposed} responded."
+        if result.platform:
+            note += (f" This site is hosted on {result.platform}, which sets the security headers and "
+                     "cookies for every site it hosts; those are shown for context and not scored.")
+        rows.append(EvidenceRow("Headers + public paths", note, True))
 
     # Secrets + checkout
     files = result.secrets.files_scanned if result.secrets else 0

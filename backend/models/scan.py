@@ -34,6 +34,9 @@ class HeaderFinding(BaseModel):
     description: str
     remediation: str
     penalty: int = 0
+    # Set by the hosting platform (e.g. Shopify), not by the site owner. Shown for
+    # context, never scored or raised as something the owner should fix.
+    platform_controlled: bool = False
 
 
 class InformationLeakFinding(BaseModel):
@@ -43,6 +46,7 @@ class InformationLeakFinding(BaseModel):
     description: str
     remediation: str
     penalty: int = 0
+    platform_controlled: bool = False
 
 
 class HeaderScanResult(BaseModel):
@@ -284,6 +288,8 @@ class FullScanResult(BaseModel):
     # scan). Those scanners are excluded from overall_risk_score.
     unverified: dict[str, str] = {}
     protection: EdgeProtection | None = None
+    # Hosted platform the site runs on (Shopify, Wix, Squarespace), when detected.
+    platform: str | None = None
     paid: bool = False
 
 

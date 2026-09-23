@@ -8,6 +8,7 @@ absence, and quality of security-relevant headers.
 import re
 from models.scan import HeaderFinding, InformationLeakFinding, HeaderScanResult, utc_now_iso
 from scanners.waf import Access, probe_access
+from scanners.platform import hosted_platform
 from scoring_config import PENALTY, scanner_score, risk_level
 
 _HSTS_MIN_AGE = 15_552_000  # 180 days per v2 spec
@@ -571,6 +572,20 @@ async def scan_headers(domain: str, access: Access | None = None) -> HeaderScanR
         findings.append(cf)
         total_penalty += cf.penalty
 
+    # On a hosted platform the headers and cookies are the platform's, identical for
+    # every store it hosts. Keep them visible, attributed, and out of the score.
+    platform = hosted_platform(response)
+    if platform:
+        for f in [*findings, *information_leaks]:
+            if f.penalty:
+                f.platform_controlled = True
+                f.penalty = 0
+                f.description = (f"Set by {platform}, which hosts this site; the site owner cannot change it. "
+                                 + f.description)
+                f.remediation = (f"No action needed from you: {platform} sets this for every site it hosts. "
+                                 "It is shown for context only.")
+        total_penalty = 0
+
     if total_penalty <= 20:
         for bonus_header in _BONUS_HEADERS:
             if bonus_header in lower_headers:
@@ -596,11 +611,13 @@ async def scan_headers(domain: str, access: Access | None = None) -> HeaderScanR
             "verified": True,
             "http_status": response.status_code,
             "client": "browser" if used_browser_ua else "scanner",
+            "platform": platform,
             "total_headers_checked": len(REQUIRED_HEADERS),
             "missing": missing_count,
             "weak": weak_count,
             "passing": passing_count,
             "information_leaks": len(information_leaks),
             "cookies_flagged": len(cookie_findings),
+            "platform_controlled": sum(1 for f in [*findings, *information_leaks] if f.platform_controlled),
         },
     )

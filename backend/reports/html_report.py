@@ -247,7 +247,7 @@ def _collect_all_findings(result: FullScanResult) -> list[dict]:
     findings: list[dict] = []
 
     for f in result.headers.findings:
-        if f.status in ("missing", "weak"):
+        if f.status in ("missing", "weak") and not f.platform_controlled:
             findings.append({
                 "title": f"Missing {f.header}" if f.status == "missing" else f"Weak {f.header}",
                 "scanner": "headers",
@@ -256,6 +256,8 @@ def _collect_all_findings(result: FullScanResult) -> list[dict]:
                 "remediation": f.remediation,
             })
     for f in result.headers.information_leaks:
+        if f.platform_controlled:
+            continue
         findings.append({
             "title": f"Server information leak via {f.header}",
             "scanner": "headers",

@@ -83,7 +83,7 @@ def _top_findings(
     severity_rank = {"high": 3, "medium": 2, "low": 1, "info": 0}
 
     for f in headers.findings:
-        if f.status == "missing" and f.severity in ("high", "medium"):
+        if f.status == "missing" and f.severity in ("high", "medium") and not f.platform_controlled:
             candidates.append({
                 "scanner": "headers",
                 "severity": f.severity,
@@ -93,7 +93,7 @@ def _top_findings(
                 "evidence": f"HTTP response did not include the {f.header} header.",
             })
     for f in headers.information_leaks:
-        if f.severity in ("high", "medium"):
+        if f.severity in ("high", "medium") and not f.platform_controlled:
             candidates.append({
                 "scanner": "headers",
                 "severity": f.severity,
@@ -238,5 +238,6 @@ def build_full_report(
             headers=headers, exposure=exposure, secrets=secrets, checkout_scripts=checkout_scripts,
         ),
         protection=protection,
+        platform=(headers.summary or {}).get("platform"),
         top_findings=_top_findings(headers, dns, ssl, exposure, secrets, checkout_scripts, dns_hijack),
     )
