@@ -42,7 +42,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization"],
+    # The frontend sends ngrok-skip-browser-warning on every request to get past
+    # ngrok's free-tier interstitial; a preflight asking for it is refused otherwise.
+    allow_headers=["Content-Type", "Authorization", "ngrok-skip-browser-warning"],
 )
 
 app.include_router(router)
