@@ -357,19 +357,18 @@ def _check_dnssec(domain: str) -> DNSHijackFinding:
     return DNSHijackFinding(
         check="DNSSEC",
         status="warn",
-        severity="medium",
+        severity="low",
         description=(
-            "DNSSEC is not enabled. Without it, DNS responses cannot be verified as authentic. "
-            "Attackers who compromise a resolver or registrar account can silently redirect "
-            "visitors to a malicious site. Attackers typically disable DNSSEC before "
-            "executing a DNS hijack to avoid detection."
+            "DNSSEC is not enabled, so resolvers cannot check that DNS answers for this domain "
+            "are authentic. This is common: most domains are unsigned. It is added protection "
+            "against forged DNS answers, not a sign that anything is wrong."
         ),
         remediation=(
-            "Enable DNSSEC through your domain registrar or DNS provider. Cloudflare, "
-            "Google Domains, and most major registrars offer a one-click toggle. Once enabled, "
-            "a DS record is published at your registrar so resolvers can verify your zone."
+            "If your DNS provider and registrar both support it, enable DNSSEC: the provider "
+            "signs the zone, then the registrar publishes the DS record. Many providers, "
+            "including Cloudflare, make this a single setting."
         ),
-        penalty=PENALTY["medium"],
+        penalty=PENALTY["low"],
     )
 
 

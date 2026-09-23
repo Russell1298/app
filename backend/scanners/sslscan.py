@@ -206,7 +206,22 @@ def _findings_from_cert(
             remediation=None, penalty=0,
         ))
 
-    if verify_error and not cert.is_self_signed:
+    if verify_error and not cert.is_self_signed and "unable to get local issuer certificate" in verify_error:
+        # Usually a missing intermediate. Desktop browsers often fetch it themselves and
+        # load the site, so "visitors see a warning" would overstate it; apps, APIs,
+        # older phones and email link scanners do fail.
+        findings.append(SSLFinding(
+            check="Certificate verification", status="fail", severity="medium",
+            description=(
+                "The certificate could not be linked to a trusted root. Usually this means the server does "
+                "not send the full certificate chain; many desktop browsers fetch the "
+                "missing piece themselves and load the site normally, but apps, APIs, older phones and "
+                f"email link scanners reject the connection. Detail: {verify_error}"
+            ),
+            remediation="Install the full chain on the server: your certificate plus the intermediate certificate(s) from your provider (often a file named fullchain.pem or ca-bundle).",
+            penalty=PENALTY["medium"],
+        ))
+    elif verify_error and not cert.is_self_signed:
         findings.append(SSLFinding(
             check="Certificate verification", status="fail", severity="high",
             description=f"Certificate failed verification: {verify_error}",

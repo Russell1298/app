@@ -186,8 +186,10 @@ _GROUP_SPEC: dict[str, dict] = {
     "other":       {"severity": "medium", "trigger": None},
 }
 
-_DIRECTORY_LISTING_MARKERS = (
-    "Index of /", "Directory listing for", "<title>Index of", "Parent Directory",
+# Matched in the page title or main heading only: a homepage or blog post that
+# merely mentions "Index of /" or "Parent Directory" is not a listing.
+_DIRECTORY_LISTING_RE = re.compile(
+    r"<(?:title|h1)[^>]*>\s*(?:Index of /|Directory listing for /)", re.IGNORECASE
 )
 
 _ENV_PATTERN = re.compile(r'(?m)^[A-Z_][A-Z0-9_]*\s*=\S', re.MULTILINE)
@@ -244,6 +246,9 @@ _CONFIRMED_SIGNATURES: dict[str, list[str]] = {
 }
 
 _POSSIBLE_ONLY_PATHS = {"/admin", "/admin/", "/wp-admin/", "/wp-login.php", "/adminer.php", "/debug"}
+
+_LOGIN_PATHS = {"/admin", "/admin/", "/wp-admin/", "/wp-login.php"}
+_LOGIN_FORM = re.compile(r"<input[^>]+type\s*=\s*[\"']?password", re.IGNORECASE)
 
 
 def _confidence(path: str, body: str, content_type: str = "") -> str:
@@ -316,6 +321,29 @@ async def _probe(
             answered_by[probe["path"]] = vendor
         return None
 
+    if status_code == 200 and probe["path"] in _LOGIN_PATHS and _LOGIN_FORM.search(resp.text[:60_000]):
+        # Every WordPress site serves wp-login.php, and an admin path that answers
+        # with a login form is doing its job. What protects it (2FA, attempt
+        # limits) cannot be seen from outside, so this is context, not a finding.
+        return ExposureFinding(
+            path=probe["path"],
+            label="Login page reachable",
+            status_code=status_code,
+            exposed=False,
+            severity="info",
+            description=(
+                f"{probe['path']} serves a login form. A reachable login page is normal, and every "
+                "WordPress site has one, so this is not an exposure on its own. How well the login is "
+                "defended cannot be seen from outside."
+            ),
+            remediation=(
+                "Optional hardening: two-factor authentication for every admin account and a limit on "
+                "failed login attempts. Most security plugins and hosts provide both."
+            ),
+            confidence="confirmed",
+            penalty=0,
+        )
+
     if status_code == 200:
         body = resp.text[:4000]
         conf = _confidence(probe["path"], body, resp.headers.get("content-type", ""))
@@ -369,7 +397,7 @@ async def _check_directory_listing(client: httpx.AsyncClient, base_url: str) -> 
         resp = await client.get(base_url + "/")
     except httpx.RequestError:
         return None
-    if resp.status_code == 200 and any(m in resp.text for m in _DIRECTORY_LISTING_MARKERS):
+    if resp.status_code == 200 and _DIRECTORY_LISTING_RE.search(resp.text[:20_000]):
         return ExposureFinding(
             path="/",
             label="Open directory listing",

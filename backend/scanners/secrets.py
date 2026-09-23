@@ -115,6 +115,10 @@ def _scan_content(content: str, source_url: str, location: str) -> list[SecretFi
             key = (label, source_url)
             if key in seen:
                 continue
+            # A Google key (AIza...) in apiKey: "..." is judged by the Google API Key
+            # pattern, which knows Firebase and Maps keys are public by design.
+            if label == "API Key" and "AIza" in m.group():
+                continue
             start = max(0, m.start() - 100)
             end = min(len(content), m.end() + 100)
             if _is_false_positive(label, content[start:end], source_url):

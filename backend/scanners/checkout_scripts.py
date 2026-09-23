@@ -72,6 +72,22 @@ _SRI_UNSUPPORTED_HOSTS = (
 )
 
 
+# Tag managers, analytics and marketing pixels. Continuously updated by the
+# vendor, so SRI cannot be used; the right advice is keeping them off payment pages.
+_MARKETING_TAG_HOSTS = (
+    "googletagmanager.com", "google-analytics.com", "connect.facebook.net", "static.hotjar.com",
+    "js.hs-scripts.com", "js.hsforms.net", "js.hs-analytics.net", "snap.licdn.com",
+    "analytics.tiktok.com", "bat.bing.com", "cdn.segment.com", "static.klaviyo.com",
+    "widget.intercom.io", "js.intercomcdn.com", "cdn.cookielaw.org", "consent.cookiebot.com",
+    "clarity.ms",
+)
+
+
+def _is_marketing_tag(src: str) -> bool:
+    low = src.lower()
+    return any(h in low for h in _MARKETING_TAG_HOSTS)
+
+
 def _sri_unsupported(src: str) -> bool:
     low = src.lower()
     return any(h in low for h in _SRI_UNSUPPORTED_HOSTS)
@@ -237,7 +253,26 @@ def _build_findings(
             ))
 
             # Script served over plain HTTP
-            if is_http and src not in reported_http:
+            if is_http and src not in reported_http and page_url.startswith("https://"):
+                # Browsers refuse to run an http:// script on an https:// page, so it
+                # cannot be swapped in transit: it simply never loads.
+                reported_http.add(src or "")
+                findings.append(CheckoutScriptFinding(
+                    finding_id="script_over_http_blocked",
+                    severity="medium",
+                    description=(
+                        f"A script on {page_url} is requested over plain HTTP: {src}. Browsers block "
+                        "it on an HTTPS page, so it does not run: whatever it was added for is "
+                        "currently broken."
+                    ),
+                    remediation=(
+                        "Change the script URL to https://, or remove the tag if it is no longer "
+                        "needed. If the provider has no HTTPS version, replace it."
+                    ),
+                    evidence=f"{page_evidence}\nScript src: {src}",
+                    penalty=PENALTY["medium"],
+                ))
+            elif is_http and src not in reported_http:
                 reported_http.add(src or "")
                 findings.append(CheckoutScriptFinding(
                     finding_id="script_over_http",
@@ -287,7 +322,26 @@ def _build_findings(
                 and domain.lower() not in src.lower()
             ):
                 reported_no_sri.add(src)
-                if _sri_unsupported(src):
+                if _is_marketing_tag(src):
+                    findings.append(CheckoutScriptFinding(
+                        finding_id="third_party_tag_on_checkout",
+                        severity="medium",
+                        description=(
+                            f"An analytics or marketing tag runs on a page that takes payment details: {src}. "
+                            "The vendor changes this file continuously, so an integrity attribute cannot be "
+                            "used; but any script on the page can read what is typed into it, which makes "
+                            "these tags a known route for card-skimming when a vendor is compromised."
+                        ),
+                        remediation=(
+                            "Remove analytics and marketing tags from payment pages, or fire them only after "
+                            "payment completes. Keep any that must stay in a written script inventory with "
+                            "the reason (PCI DSS 6.4.3), and limit script-src in a Content-Security-Policy."
+                        ),
+                        evidence=(f"{page_evidence}\nScript src: {src}\n"
+                                  f"Payment page evidence: {', '.join(payment_markers)}"),
+                        penalty=PENALTY["medium"],
+                    ))
+                elif _sri_unsupported(src):
                     findings.append(CheckoutScriptFinding(
                         finding_id="sri_unsupported_payment_script",
                         severity="low",

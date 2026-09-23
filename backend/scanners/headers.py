@@ -79,8 +79,10 @@ REQUIRED_HEADERS: list[dict] = [
         "display": "Referrer-Policy",
         "severity": "low",
         "description": (
-            "Referrer-Policy is missing. Browsers may send full URLs in the Referer "
-            "header to third-party sites, leaking internal paths or session tokens."
+            "Referrer-Policy is not set. Current browsers default to a safe policy "
+            "(strict-origin-when-cross-origin), so this mainly matters for older browsers "
+            "and in-app webviews, which can send full URLs, including any tokens in them, "
+            "to other sites."
         ),
         "remediation": (
             "Add the header Referrer-Policy: strict-origin-when-cross-origin. This keeps "
@@ -120,9 +122,11 @@ LEAK_HEADERS: list[dict] = [
         ),
     },
     {
+        # Only a version number helps an attacker look up known bugs. A bare
+        # "Next.js" or "WP Engine" is set by the host and names nothing exploitable.
         "header": "x-powered-by",
         "severity": "medium",
-        "versioned_only": False,
+        "versioned_only": True,
         "description": (
             "X-Powered-By exposes the application framework and version. "
             "This helps attackers target known CVEs."
@@ -161,7 +165,20 @@ _BONUS_HEADERS = (
     "cross-origin-resource-policy",
 )
 
-_VERSION_RE = re.compile(r'\d')
+# A dotted version such as nginx/1.18.0 or PHP/8.1.2. A bare digit is not one:
+# "AmazonS3" contains a 3 and reveals nothing.
+_VERSION_RE = re.compile(r"\d+\.\d+")
+
+# Server software run by a managed platform. The customer cannot change these
+# headers, and the platform's version says nothing about the customer's site.
+_PLATFORM_SERVERS = (
+    "cloudflare", "vercel", "netlify", "github.com", "amazons3", "pepyaka", "squarespace",
+    "shopify", "wp engine", "wpengine", "kinsta", "flywheel", "pantheon", "gws", "google frontend",
+)
+
+# Set by the CDN in front of the site, correctly flagged by the vendor for their
+# purpose, and outside the customer's control.
+_VENDOR_COOKIES = ("__cf_bm", "cf_clearance", "__cfruid", "_cfuvid", "__cflb")
 
 # CSP can be delivered via an HTML meta tag instead of a response header — the
 # spec explicitly allows it. A scanner that only reads headers reports a false
@@ -241,6 +258,8 @@ def _check_cookies(set_cookie_lines: list[str]) -> list[HeaderFinding]:
         if not line:
             continue
         name = line.split("=", 1)[0].strip()
+        if name.lower() in _VENDOR_COOKIES:
+            continue
         low = line.lower()
         if "secure" not in low:
             no_secure.append(name)
@@ -299,9 +318,11 @@ def _check_cookies(set_cookie_lines: list[str]) -> list[HeaderFinding]:
             severity="low",
             value=", ".join(weak_samesite[:8]),
             description=(
-                "One or more cookies have no SameSite attribute or use SameSite=None. This lets "
-                "the cookie ride along on cross-site requests, which is the basis of cross-site "
-                "request forgery (CSRF)."
+                "One or more cookies have no SameSite attribute or use SameSite=None. Chrome and "
+                "Edge treat a missing attribute as Lax, but Firefox and Safari do not, so there the "
+                "cookie is sent on cross-site requests. That matters for session cookies, where it "
+                "helps cross-site request forgery (CSRF); SameSite=None is correct for cookies that "
+                "must work across sites."
             ),
             remediation=(
                 "Set SameSite=Lax (or Strict for sensitive actions) on your cookies. Use "
@@ -457,6 +478,8 @@ async def scan_headers(domain: str, access: Access | None = None) -> HeaderScanR
         value = lower_headers.get(spec["header"])
         if value:
             if spec.get("versioned_only") and not _VERSION_RE.search(value):
+                continue
+            if any(p in value.lower() for p in _PLATFORM_SERVERS):
                 continue
             p = PENALTY[spec["severity"]]
             information_leaks.append(InformationLeakFinding(

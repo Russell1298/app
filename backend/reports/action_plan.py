@@ -620,7 +620,10 @@ def _action_certificate(result: FullScanResult) -> Action | None:
 def _action_dns_hijack(result: FullScanResult) -> Action | None:
     if not result.dns_hijack:
         return None
-    findings = [f for f in result.dns_hijack.findings if f.status in ("fail", "warn")]
+    # Only the checks this action describes. DNSSEC has its own action, and an
+    # incomplete check is shown on the evidence page, not raised as something to fix.
+    findings = [f for f in result.dns_hijack.findings
+                if f.status in ("fail", "warn") and f.check != "DNSSEC"]
     if not findings:
         return None
     worst = findings[0]
@@ -633,8 +636,8 @@ def _action_dns_hijack(result: FullScanResult) -> Action | None:
         owner=OWNER_DNS,
         headline="Confirm where your domain points",
         brief=(
-            "Public resolvers did not agree on this domain's answers, or a consistency check did not "
-            "complete. Have your DNS provider confirm the intended records."
+            "Public DNS lookups for this domain returned answers that need your DNS provider to confirm "
+            "they are the records you intended."
         ),
         section_owner="DNS PROVIDER",
         topic="DNS",
@@ -807,7 +810,11 @@ def _action_tls(result: FullScanResult) -> Action | None:
 
 
 def _action_dnssec(result: FullScanResult) -> Action | None:
-    findings = _dns_findings(result, "DNSSEC", "DS record")
+    # DNSSEC is checked by the dns_hijack scanner; older saved scans had it in dns.
+    findings = _dns_findings(result, "DNSSEC", "DS record") + [
+        f for f in (result.dns_hijack.findings if result.dns_hijack else [])
+        if f.check == "DNSSEC" and f.status in ("fail", "warn")
+    ]
     if not findings:
         return None
     return Action(
