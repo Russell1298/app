@@ -29,7 +29,8 @@ _RESOLVERS: dict[str, str] = {
 }
 
 _FAST_FLUX_TTL_THRESHOLD = 300   # seconds; TTL below this triggers inspection
-_FAST_FLUX_IP_MIN = 3            # at least this many IPs alongside low TTL = fast-flux
+_FAST_FLUX_IP_MIN = 3            # at least this many IPs alongside low TTL triggers inspection
+_FAST_FLUX_ASN_MIN = 3           # ...and spread across at least this many networks = fast-flux
 
 
 def _make_resolver(server_ip: str) -> dns.resolver.Resolver:
@@ -46,8 +47,9 @@ def _query_a_with_ttl(
     try:
         answers = resolver.resolve(domain, "A")
         ips = [r.to_text() for r in answers]
-        min_ttl = min(r.ttl for r in answers) if answers else None
-        return ips, min_ttl
+        # TTL belongs to the record set; individual records have none.
+        ttl = answers.rrset.ttl if answers.rrset is not None else None
+        return ips, ttl
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
         return [], None
     except dns.exception.DNSException:
@@ -107,14 +109,13 @@ def _asns_for_ips(ips: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(ips)) as pool:
         futures = {pool.submit(_asn_for_ip, ip): ip for ip in ips}
-        for future in concurrent.futures.as_completed(futures, timeout=_ASN_LOOKUP_WAIT):
-            ip = futures[future]
-            try:
+        try:
+            for future in concurrent.futures.as_completed(futures, timeout=_ASN_LOOKUP_WAIT):
                 asn = future.result()
                 if asn:
-                    result[ip] = asn
-            except Exception:
-                pass
+                    result[futures[future]] = asn
+        except concurrent.futures.TimeoutError:
+            pass  # callers treat missing entries as "unknown"
     return result
 
 
@@ -241,43 +242,43 @@ def _check_fast_flux(domain: str) -> DNSHijackFinding:
             penalty=0,
         )
 
+    # A low TTL with several IPs is also exactly how CDNs and cloud load balancers
+    # answer (CloudFront, AWS ALB, Akamai: TTL 60, 4-8 IPs). A resolver also reports
+    # the time left in its cache, not the TTL the owner set. What separates
+    # fast-flux is IPs spread across many unrelated networks, so that is required.
     if ttl < _FAST_FLUX_TTL_THRESHOLD and len(ips) >= _FAST_FLUX_IP_MIN:
-        return DNSHijackFinding(
-            check="Fast-flux DNS",
-            status="fail",
-            severity="high",
-            description=(
-                f"Fast-flux indicators: {len(ips)} A records with TTL={ttl}s "
-                f"(threshold: {_FAST_FLUX_TTL_THRESHOLD}s). "
-                "Production sites rarely need TTLs under 5 minutes. Fast-flux is a technique "
-                "attackers use to rapidly rotate IPs, making the domain harder to take down "
-                "and obscuring malicious infrastructure."
-            ),
-            remediation=(
-                "If you didn't configure this, your DNS may have been hijacked. Log in to "
-                "your DNS provider and verify all A records. Increase TTL to at least 300s; "
-                "3600s is typical for production. If records were changed without your "
-                "authorisation, treat this as a security incident and rotate DNS provider credentials."
-            ),
-            penalty=PENALTY["high"],
-        )
-
-    if ttl < _FAST_FLUX_TTL_THRESHOLD:
-        return DNSHijackFinding(
-            check="Fast-flux DNS",
-            status="warn",
-            severity="low",
-            description=(
-                f"A record TTL is unusually low: {ttl}s (threshold: {_FAST_FLUX_TTL_THRESHOLD}s). "
-                "Very short TTLs are sometimes used during DNS migrations, but are also "
-                "characteristic of malicious fast-flux infrastructure."
-            ),
-            remediation=(
-                "If not mid-migration, raise your A record TTL to at least 300s. "
-                "A typical production TTL is 3600s (1 hour)."
-            ),
-            penalty=PENALTY["low"],
-        )
+        asns = _asns_for_ips(ips)
+        distinct = set(asns.values())
+        if len(distinct) >= _FAST_FLUX_ASN_MIN:
+            return DNSHijackFinding(
+                check="Fast-flux DNS",
+                status="fail",
+                severity="high",
+                description=(
+                    f"Fast-flux indicators: {len(ips)} A records with TTL={ttl}s spread across "
+                    f"{len(distinct)} unrelated networks (ASNs: {', '.join(sorted(distinct))}). "
+                    "Legitimate CDNs and load balancers answer from one provider's network; rotating "
+                    "IPs across many unrelated networks is how malicious fast-flux infrastructure works."
+                ),
+                remediation=(
+                    "Log in to your DNS provider and verify every A record. If you did not add these "
+                    "addresses, treat it as a security incident: rotate your DNS provider credentials "
+                    "and enable two-factor authentication on the account."
+                ),
+                penalty=PENALTY["high"],
+            )
+        if len(asns) < len(ips):
+            return DNSHijackFinding(
+                check="Fast-flux DNS",
+                status="info",
+                severity=None,
+                description=(
+                    f"{len(ips)} A records with TTL={ttl}s. Network ownership of the addresses could not "
+                    "be confirmed, so fast-flux could not be assessed."
+                ),
+                remediation=None,
+                penalty=0,
+            )
 
     return DNSHijackFinding(
         check="Fast-flux DNS",

@@ -140,6 +140,10 @@ def _probe_tls_version(domain: str, version: ssl.TLSVersion) -> bool | None:
         ctx.verify_mode = ssl.CERT_NONE
         ctx.minimum_version = version
         ctx.maximum_version = version
+        # OpenSSL 3 refuses to offer TLS 1.0/1.1 at its default security level, so
+        # without this every legacy probe fails client-side and the report says
+        # "correctly disabled" about servers that still accept them.
+        ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
     except (AttributeError, ssl.SSLError):
         return None
     try:
