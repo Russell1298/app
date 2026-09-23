@@ -19,7 +19,7 @@ COMPANY = {
     "name":     "Sekura",
     "tagline":  "Website security assessment and remediation for small business.",
     "location": "Seattle, WA",
-    "email":    "russell.p@sekura.cloud",
+    "email":    "russell@sekura.cloud",
     "website":  "sekura.cloud",
     "methodology_url": "sekura.cloud/security",
 }

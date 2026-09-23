@@ -212,3 +212,12 @@ def test_dmarc_is_read_from_its_own_record_type():
     assert "DMARC p=none" in plan.evidence_rows[0].note
     observed = "\n".join(plan.actions[0].observed.lines)
     assert "rua=mailto:dmarc@sekura.cloud" in observed
+
+
+def test_reports_carry_the_current_contact_address():
+    from reports.html_report import COMPANY, generate_html
+    assert COMPANY["email"] == "russell@sekura.cloud"
+    detailed = generate_html(make_result())
+    assert "russell@sekura.cloud" in detailed
+    for html in (detailed, generate_action_plan_html(make_result())):
+        assert "russell.p@" not in html
