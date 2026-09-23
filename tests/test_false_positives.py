@@ -253,3 +253,40 @@ def test_dnssec_warning_does_not_become_a_resolver_disagreement_action():
         risk_score=3, risk_level="low", summary={})
     keys = [a.key for a in build_action_plan(ta.make_result(dns_hijack=hijack)).actions]
     assert "dns_hijack" not in keys
+
+
+# ---------------------------------------------------------------------------
+# CSP: judge what the policy restricts, not whether the header exists
+# ---------------------------------------------------------------------------
+
+from scanners.headers import _check_csp_value
+
+
+@pytest.mark.parametrize("policy", [
+    "upgrade-insecure-requests",                                    # jobcopilot.com: restricts no scripts
+    "frame-ancestors 'self'; upgrade-insecure-requests",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'",        # inline scripts run
+    "default-src *",                                                # any source
+    "script-src 'self' https:",                                     # any https site
+])
+def test_policies_that_do_not_restrict_scripts_are_weak(policy):
+    finding = _check_csp_value(policy)
+    assert finding is not None and finding.status == "weak"
+
+
+@pytest.mark.parametrize("policy", [
+    "default-src 'self'",
+    "default-src 'self'; script-src 'self' https://www.googletagmanager.com",
+    # Browsers ignore 'unsafe-inline' when a nonce or hash is present (CSP2+)...
+    "script-src 'self' 'unsafe-inline' 'nonce-r4nd0m'",
+    # ...and ignore host/scheme allowlists when 'strict-dynamic' is present (CSP3).
+    "script-src 'nonce-r4nd0m' 'strict-dynamic' https: 'unsafe-inline'",
+    # script-src governs scripts even when default-src is permissive.
+    "default-src *; script-src 'self'",
+])
+def test_policies_that_restrict_scripts_pass(policy):
+    assert _check_csp_value(policy) is None
+
+
+def test_first_directive_wins_like_in_browsers():
+    assert _check_csp_value("script-src 'self'; script-src *") is None

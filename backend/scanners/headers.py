@@ -239,6 +239,72 @@ def _check_hsts_value(value: str) -> HeaderFinding | None:
     return None
 
 
+# Script sources that let any site's code run.
+_CSP_OPEN_SOURCES = {"*", "http:", "https:", "data:"}
+_CSP_HASH_PREFIXES = ("'nonce-", "'sha256-", "'sha384-", "'sha512-")
+
+
+def _check_csp_value(value: str, via_meta: bool = False) -> HeaderFinding | None:
+    """
+    A CSP header's presence says nothing about protection: "upgrade-insecure-requests"
+    alone is a valid CSP that restricts no scripts. Judge the policy that governs
+    scripts, applying the same precedence rules browsers do.
+    """
+    directives: dict[str, list[str]] = {}
+    for part in value.split(";"):
+        tokens = part.strip().split()
+        if tokens and tokens[0].lower() not in directives:  # browsers ignore repeated directives
+            directives[tokens[0].lower()] = [t.lower() for t in tokens[1:]]
+
+    shown = f"(via <meta> tag) {value}" if via_meta else value
+    governing = "script-src" if "script-src" in directives else "default-src" if "default-src" in directives else None
+
+    if governing is None:
+        return HeaderFinding(
+            header="Content-Security-Policy",
+            status="weak",
+            severity="medium",
+            value=shown,
+            description=(
+                "A Content-Security-Policy is set, but it has no script-src or default-src directive, so it "
+                "does not restrict which scripts can run and gives no protection against cross-site "
+                f"scripting (XSS). Directives present: {', '.join(directives) or 'none'}."
+            ),
+            remediation=(
+                "Add a default-src or script-src directive listing only the sources your pages need, for "
+                "example: default-src 'self'; script-src 'self' https://www.googletagmanager.com. Deploy it as "
+                "Content-Security-Policy-Report-Only first to see what it would block."
+            ),
+            penalty=PENALTY["medium"],
+        )
+
+    sources = directives[governing]
+    # CSP2+ browsers ignore 'unsafe-inline' when a nonce or hash is present, and
+    # ignore host/scheme allowlists when 'strict-dynamic' is present.
+    has_nonce_or_hash = any(s.startswith(_CSP_HASH_PREFIXES) for s in sources)
+    problems: list[str] = []
+    if "'unsafe-inline'" in sources and not has_nonce_or_hash:
+        problems.append("'unsafe-inline', so any inline script runs, which is how most XSS executes")
+    open_sources = [s for s in sources if s in _CSP_OPEN_SOURCES]
+    if open_sources and "'strict-dynamic'" not in sources:
+        problems.append(f"{' '.join(open_sources)}, so scripts can load from any site")
+    if not problems:
+        return None
+
+    return HeaderFinding(
+        header="Content-Security-Policy",
+        status="weak",
+        severity="medium",
+        value=shown,
+        description=f"The policy's {governing} allows {'; and '.join(problems)}.",
+        remediation=(
+            "Replace 'unsafe-inline' with nonces or hashes so only inline scripts you approved run, and list "
+            "specific script hosts instead of wildcards or bare schemes. Test changes in report-only mode first."
+        ),
+        penalty=PENALTY["medium"],
+    )
+
+
 def _check_cookies(set_cookie_lines: list[str]) -> list[HeaderFinding]:
     """
     Inspect Set-Cookie headers for the Secure, HttpOnly, and SameSite attributes.
@@ -383,6 +449,7 @@ async def scan_headers(domain: str, access: Access | None = None) -> HeaderScanR
     # frame-ancestors is spec-disallowed inside a meta tag, so this deliberately
     # does not feed into has_frame_ancestors above.
     csp_meta_value = _extract_meta_csp(body_text) if not csp_value else None
+    meta_weak = _check_csp_value(csp_meta_value, via_meta=True) if csp_meta_value else None
 
     findings: list[HeaderFinding] = []
     information_leaks: list[InformationLeakFinding] = []
@@ -393,7 +460,10 @@ async def scan_headers(domain: str, access: Access | None = None) -> HeaderScanR
         value = lower_headers.get(key)
 
         if value is None:
-            if key == "content-security-policy" and csp_meta_value:
+            if key == "content-security-policy" and meta_weak:
+                findings.append(meta_weak)
+                total_penalty += meta_weak.penalty
+            elif key == "content-security-policy" and csp_meta_value:
                 findings.append(HeaderFinding(
                     header=spec["display"],
                     status="present",
@@ -459,6 +529,8 @@ async def scan_headers(domain: str, access: Access | None = None) -> HeaderScanR
             weak_finding = None
             if key == "strict-transport-security":
                 weak_finding = _check_hsts_value(value)
+            elif key == "content-security-policy":
+                weak_finding = _check_csp_value(value)
 
             if weak_finding:
                 findings.append(weak_finding)
