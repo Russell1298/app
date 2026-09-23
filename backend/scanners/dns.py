@@ -71,6 +71,26 @@ _TAKEOVER_RESOLVER.timeout = 3
 _TAKEOVER_RESOLVER.lifetime = 5
 
 
+def mail_domain(domain: str) -> str:
+    """
+    The domain email records live on. People type "www.shop.com"; SPF, DMARC and
+    MX are published on "shop.com", and checking them on the www host reports
+    missing records that exist.
+    """
+    return domain[4:] if domain.startswith("www.") and domain.count(".") >= 2 else domain
+
+
+def climb(name: str):
+    """
+    name, then each parent down to two labels. CAA (RFC 8659) and DMARC's
+    organizational-domain fallback are both defined by walking up the tree, and
+    NS and DNSSEC live at the zone apex, not on every host under it.
+    """
+    labels = name.split(".")
+    for i in range(0, max(1, len(labels) - 1)):
+        yield ".".join(labels[i:])
+
+
 def _query(name: str, rdtype: str) -> list[str]:
     try:
         answers = _RESOLVER.resolve(name, rdtype)
@@ -144,7 +164,11 @@ def _check_mx(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
 
 
 def _check_ns(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
-    values = _query(domain, "NS")
+    values: list[str] = []
+    for name in climb(domain):
+        values = _query(name, "NS")
+        if values:
+            break
     if values:
         return (
             DNSRecord(record_type="NS", values=values),
@@ -236,9 +260,13 @@ def _check_spf(domain: str) -> DNSFinding:
 
 
 def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
-    dmarc_name = f"_dmarc.{domain}"
-    values = _txt_records(dmarc_name)
-    dmarc_records = [r for r in values if r.startswith("v=DMARC1")]
+    # Receivers fall back to the organizational domain's policy, so a record on a
+    # parent covers this name too.
+    dmarc_records: list[str] = []
+    for name in climb(domain):
+        dmarc_records = [r for r in _txt_records(f"_dmarc.{name}") if r.startswith("v=DMARC1")]
+        if dmarc_records:
+            break
 
     if not dmarc_records:
         return (
@@ -295,7 +323,11 @@ def _check_dmarc(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
 
 
 def _check_caa(domain: str) -> tuple[DNSRecord | None, DNSFinding]:
-    values = _query(domain, "CAA")
+    values: list[str] = []
+    for name in climb(domain):  # RFC 8659: the closest CAA record up the tree applies
+        values = _query(name, "CAA")
+        if values:
+            break
     if values:
         return (
             DNSRecord(record_type="CAA", values=values),
@@ -462,15 +494,18 @@ async def scan_dns(domain: str, subdomains: list[str] | None = None) -> DNSScanR
     """
     loop = asyncio.get_event_loop()
 
+    mail = mail_domain(domain)
+
     def _run_all() -> tuple:
         a_record, a_finding = _check_a(domain)
-        mx_record, mx_finding = _check_mx(domain)
+        mx_record, mx_finding = _check_mx(mail)
         ns_record, ns_finding = _check_ns(domain)
-        txt_record = _check_txt(domain)
-        spf_finding = _check_spf(domain)
-        dmarc_record, dmarc_finding = _check_dmarc(domain)
+        txt_record = _check_txt(mail)
+        spf_finding = _check_spf(mail)
+        dmarc_record, dmarc_finding = _check_dmarc(mail)
         caa_record, caa_finding = _check_caa(domain)
-        takeover_findings = _check_subdomain_takeovers(domain, subdomains)
+        # Candidates like checkout.<domain> hang off the apex, not www.
+        takeover_findings = _check_subdomain_takeovers(mail, subdomains)
         return (
             a_record, a_finding, mx_record, mx_finding,
             ns_record, ns_finding, txt_record,

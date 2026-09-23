@@ -25,7 +25,11 @@ _PATTERNS: list[tuple[str, str, str]] = [
     (r"rk_live_[A-Za-z0-9]{24,}",                                  "Stripe Restricted Key",        "high"),
     (r"ghp_[A-Za-z0-9]{36}",                                       "GitHub Personal Access Token", "high"),
     (r"ghs_[A-Za-z0-9]{36}",                                       "GitHub App Token",             "high"),
-    (r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----",                  "Private Key",                  "high"),
+    # The header alone is a constant in every PEM-parsing library. Require key
+    # material after it (base64, allowing real or escaped "\n" line breaks). The
+    # material is a lookahead so the match, and its redacted preview, is the header only.
+    (r"-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----(?=(?:\s|\\n)*[A-Za-z0-9+/=]{40})",
+                                                                   "Private Key",                  "high"),
     (r"ya29\.[0-9A-Za-z\-_]+",                                     "Google OAuth Token",           "high"),
     (r"EAACEdEose0cBA[0-9A-Za-z]+",                                "Facebook Access Token",        "high"),
     (r"mongodb(?:\+srv)?://[^:\s]+:[^@\s]+@",                      "MongoDB Connection String",    "high"),

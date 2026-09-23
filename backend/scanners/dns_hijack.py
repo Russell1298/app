@@ -21,6 +21,7 @@ import dns.resolver
 import dns.exception
 from models.scan import DNSHijackFinding, DNSHijackScanResult, utc_now_iso
 from scoring_config import PENALTY, scanner_score, risk_level
+from scanners.dns import climb, mail_domain
 
 _RESOLVERS: dict[str, str] = {
     "Google (8.8.8.8)":      "8.8.8.8",
@@ -291,7 +292,7 @@ def _check_fast_flux(domain: str) -> DNSHijackFinding:
 
 
 def _check_mx_anomaly(domain: str) -> DNSHijackFinding:
-    mx_hosts = _query_mx_hosts(domain, _make_resolver("8.8.8.8"))
+    mx_hosts = _query_mx_hosts(mail_domain(domain), _make_resolver("8.8.8.8"))
 
     if not mx_hosts:
         return DNSHijackFinding(
@@ -337,9 +338,10 @@ def _check_mx_anomaly(domain: str) -> DNSHijackFinding:
 
 def _check_dnssec(domain: str) -> DNSHijackFinding:
     resolver = _make_resolver("8.8.8.8")
-    for rdtype in ("DS", "DNSKEY"):
+    # DS and DNSKEY exist only at the zone apex, never on hosts such as www.
+    for name, rdtype in ((n, t) for n in climb(domain) for t in ("DS", "DNSKEY")):
         try:
-            answers = resolver.resolve(domain, rdtype)
+            answers = resolver.resolve(name, rdtype)
             if answers:
                 return DNSHijackFinding(
                     check="DNSSEC",

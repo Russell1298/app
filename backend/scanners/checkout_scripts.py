@@ -334,27 +334,29 @@ def _build_findings(
                     penalty=PENALTY["high"],
                 ))
 
-            # Suspicious inline obfuscation patterns
+            # Obfuscation-style calls. Themes, tag managers and consent tools use these
+            # routinely, so they are only worth raising where card details are entered,
+            # and even there they are a prompt to review, not evidence of compromise.
+            if not is_checkout_page:
+                patterns = []
             for pattern_name in patterns:
                 dedup_key = f"{page_url}:{pattern_name}"
                 if dedup_key not in reported_patterns:
                     reported_patterns.add(dedup_key)
-                    is_severe = pattern_name in ("eval_call", "atob_call", "hex_obfuscation")
-                    sev: str = "high" if is_severe else "medium"
+                    sev: str = "medium" if pattern_name in ("eval_call", "hex_obfuscation") else "low"
                     findings.append(CheckoutScriptFinding(
                         finding_id=f"suspicious_pattern_{pattern_name}",
                         severity=sev,  # type: ignore[arg-type]
                         description=(
-                            f"Suspicious JavaScript pattern '{pattern_name}' found on {page_url}. "
-                            "This technique is commonly used to hide payment skimmer code from "
-                            "simple code review. Legitimate scripts rarely use runtime eval or "
-                            "base64 decoding, especially on checkout pages."
+                            f"An inline script on a payment page ({page_url}) uses '{pattern_name}'. "
+                            "Legitimate code uses this too, and payment skimmers use it to hide, so it "
+                            "is worth confirming where the script comes from. On its own it is not "
+                            "evidence of compromise."
                         ),
                         remediation=(
-                            "Audit all inline JavaScript on this page. If you didn't write this "
-                            "code, treat it as a potential compromise. Check your plugins and "
-                            "theme files for recent unexplained modifications. "
-                            "Consider a CSP that blocks all inline scripts."
+                            "Ask your developer to identify which theme, plugin or tag added this "
+                            "inline script. If nobody recognises it, compare it with a clean backup and "
+                            "check for recent unexplained changes to plugins and theme files."
                         ),
                         evidence=(
                             f"{page_evidence}\n"
