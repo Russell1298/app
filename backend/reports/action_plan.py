@@ -120,6 +120,33 @@ class ActionPlan:
     scope: str
     sheets: list[Sheet]
     page_total: int
+    protection_note: str | None = None
+
+
+def _protection_note(result: FullScanResult, evidence_page: int) -> str | None:
+    """
+    One sentence on the protection layer in front of the site. Context, not a
+    grade: it claims only what the scan observed, and never that firewall rules
+    are on when all we saw was traffic routed through the vendor.
+    """
+    p = result.protection
+    if p is None:
+        return None
+    incomplete = f"so the checks that read your pages are marked incomplete on page {evidence_page}."
+    if p.evidence == "challenge":
+        if p.blocked:
+            return (f"{p.vendor} bot protection is active on this site: it challenged our automated scanner "
+                    f"and a standard browser request alike, {incomplete}")
+        return (f"{p.vendor} bot protection is active on this site: it challenged our scanner when the scanner "
+                "identified itself as an automated tool.")
+    if p.evidence == "rules":
+        paths = ", ".join(p.paths[:3])
+        return (f"{p.vendor}'s firewall is active on this site: it answered our requests for sensitive paths "
+                f"({paths}) in place of your server.")
+    if p.blocked:
+        return f"Your site is served through {p.vendor}'s network, and the site refused our scan, {incomplete}"
+    return (f"Your site is served through {p.vendor}'s network. Whether its firewall rules are switched on "
+            "cannot be confirmed from outside.")
 
 
 # ---------------------------------------------------------------------------
@@ -1128,4 +1155,5 @@ def build_action_plan(result: FullScanResult, client_name: str = "") -> ActionPl
         scope=SCOPE_TEXT,
         sheets=sheets,
         page_total=len(sheets),
+        protection_note=_protection_note(result, len(sheets)),
     )

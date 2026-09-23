@@ -226,3 +226,95 @@ def test_score_unchanged_when_everything_is_verified():
 def test_unverified_scanners_are_named_in_the_report():
     h, d, s, e = _results({"verified": False, "error": "Cloudflare answered with a bot-protection page."})
     assert _unverified(headers=h, exposure=e) == {"headers": "Cloudflare answered with a bot-protection page."}
+
+
+# ---------------------------------------------------------------------------
+# Protection observed in front of the site (reported as context, never scored)
+# ---------------------------------------------------------------------------
+
+from models.scan import EdgeProtection
+from reports.action_plan import _protection_note, build_action_plan
+from reports.html_report import generate_action_plan_html
+
+
+def test_routing_header_identifies_the_edge_network():
+    assert waf.edge_vendor(resp(200, {"cf-ray": "8c1-SEA"})) == "Cloudflare"
+    assert waf.edge_vendor(resp(200, {"server": "AkamaiGHost"})) == "Akamai"
+    assert waf.edge_vendor(resp(200, {"server": "nginx"})) is None
+
+
+def test_challenge_to_the_scanner_is_evidence_even_when_the_browser_gets_through():
+    with _homepage(resp(200, text=CF_CHALLENGE_200), resp(200, {**FULL_HEADERS, "cf-ray": "x"})):
+        access = run(waf.probe_access(DOMAIN))
+    assert access.protection == EdgeProtection(vendor="Cloudflare", evidence="challenge", blocked=False)
+
+
+def test_challenge_to_both_clients_is_recorded_as_blocking():
+    with _homepage(resp(403, {"cf-mitigated": "challenge"}), resp(403, {"cf-mitigated": "challenge"})):
+        access = run(waf.probe_access(DOMAIN))
+    assert access.protection.evidence == "challenge" and access.protection.blocked
+
+
+def test_routed_but_unchallenged_is_only_edge_evidence():
+    with _homepage(resp(200, {**FULL_HEADERS, "cf-ray": "x"}), resp(200, FULL_HEADERS)):
+        access = run(waf.probe_access(DOMAIN))
+    assert access.protection == EdgeProtection(vendor="Cloudflare", evidence="edge")
+
+
+def test_no_protection_claimed_for_a_plain_site():
+    with _homepage(resp(200, FULL_HEADERS), resp(200, FULL_HEADERS)):
+        access = run(waf.probe_access(DOMAIN))
+    assert access.protection is None
+
+
+def test_vendor_answering_sensitive_paths_upgrades_edge_to_rules():
+    access = Access(resp(200), {}, "scanner", None, EdgeProtection(vendor="Cloudflare", evidence="edge"))
+    p = waf.observed_protection(access, {"waf_blocked": {"/.env": "Cloudflare", "/.git/HEAD": "Cloudflare"}})
+    assert p.evidence == "rules" and p.paths == ["/.env", "/.git/HEAD"]
+
+
+def test_a_challenge_is_not_downgraded_by_path_evidence():
+    access = Access(resp(200), {}, "browser", None, EdgeProtection(vendor="Cloudflare", evidence="challenge"))
+    assert waf.observed_protection(access, {"waf_blocked": {"/.env": "Cloudflare"}}).evidence == "challenge"
+
+
+def test_only_sensitive_paths_count_as_firewall_evidence():
+    robots = next(p for p in exposure._PROBES if p["path"] == "/robots.txt")
+    challenge = resp(403, {"cf-mitigated": "challenge"})
+    answered: dict[str, str] = {}
+    for probe in (ENV_PROBE, robots):
+        run(exposure._probe(_OneResponseClient(challenge), f"https://{DOMAIN}", probe, refused=[], answered_by=answered))
+    assert answered == {"/.env": "Cloudflare"}
+
+
+def _with_protection(p):
+    import test_action_plan as ta
+    return ta.make_result(protection=p)
+
+
+def test_edge_wording_never_claims_the_firewall_is_on():
+    note = _protection_note(_with_protection(EdgeProtection(vendor="Cloudflare", evidence="edge")), 4)
+    assert "served through Cloudflare" in note
+    assert "cannot be confirmed" in note
+    assert "active" not in note and "protected" not in note
+
+
+@pytest.mark.parametrize("p, expected", [
+    (EdgeProtection(vendor="Cloudflare", evidence="challenge"), "Cloudflare bot protection is active"),
+    (EdgeProtection(vendor="Cloudflare", evidence="challenge", blocked=True), "marked incomplete on page 4"),
+    (EdgeProtection(vendor="Sucuri", evidence="rules", paths=["/.env"]), "Sucuri's firewall is active on this site: it answered our requests for sensitive paths (/.env)"),
+])
+def test_note_states_what_was_observed(p, expected):
+    assert expected in _protection_note(_with_protection(p), 4)
+
+
+def test_note_appears_on_the_owner_brief_and_is_labelled_not_scored():
+    result = _with_protection(EdgeProtection(vendor="Cloudflare", evidence="challenge"))
+    html = generate_action_plan_html(result)
+    first_page = html.split('class="sheet"')[1]
+    assert "Cloudflare bot protection is active" in first_page
+    assert "Not scored" in first_page
+
+
+def test_no_note_when_nothing_was_observed():
+    assert build_action_plan(_with_protection(None)).protection_note is None

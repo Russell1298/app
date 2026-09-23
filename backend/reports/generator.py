@@ -12,7 +12,7 @@ from models.scan import (
     ExposureScanResult, FingerprintScanResult,
     SubdomainScanResult, SecretScanResult,
     CheckoutScriptScanResult, DNSHijackScanResult,
-    FullScanResult, utc_now_iso,
+    FullScanResult, EdgeProtection, utc_now_iso,
 )
 from scoring_config import SCANNER_WEIGHTS, CRITICAL_CAPS, risk_level
 
@@ -217,6 +217,7 @@ def build_full_report(
     secrets: SecretScanResult | None = None,
     checkout_scripts: CheckoutScriptScanResult | None = None,
     dns_hijack: DNSHijackScanResult | None = None,
+    protection: EdgeProtection | None = None,
 ) -> FullScanResult:
     score = _weighted_score(headers, dns, ssl, exposure, secrets, checkout_scripts, dns_hijack)
     return FullScanResult(
@@ -236,5 +237,6 @@ def build_full_report(
         unverified=_unverified(
             headers=headers, exposure=exposure, secrets=secrets, checkout_scripts=checkout_scripts,
         ),
+        protection=protection,
         top_findings=_top_findings(headers, dns, ssl, exposure, secrets, checkout_scripts, dns_hijack),
     )

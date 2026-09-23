@@ -18,7 +18,7 @@ from scanners.subdomain import scan_subdomains
 from scanners.secrets import scan_secrets
 from scanners.checkout_scripts import scan_checkout_scripts
 from scanners.dns_hijack import scan_dns_hijack
-from scanners.waf import Access, probe_access
+from scanners.waf import Access, probe_access, observed_protection
 from reports.generator import build_full_report
 from netguard import assert_public_host_async
 from models.scan import (
@@ -81,15 +81,16 @@ async def run_full_scan(domain: str) -> FullScanResult:
         # One homepage probe decides whether the site's real pages are reachable.
         # Every page-reading scanner uses it, so none of them grades a WAF page.
         access = await probe_access(domain)
-        return await asyncio.gather(
+        headers_r, exposure_r, secrets_r, checkout_r = await asyncio.gather(
             scan_headers(domain, access),
             scan_exposure(domain, access),
             scan_secrets(domain, access),
             _safe_checkout(domain, access),
         )
+        return headers_r, exposure_r, secrets_r, checkout_r, observed_protection(access, exposure_r.summary)
 
     (
-        (headers_result, exposure_result, secrets_result, checkout_result),
+        (headers_result, exposure_result, secrets_result, checkout_result, protection),
         dns_result,
         ssl_result,
         fingerprint_result,
@@ -115,4 +116,5 @@ async def run_full_scan(domain: str) -> FullScanResult:
         secrets=secrets_result,
         checkout_scripts=checkout_result,
         dns_hijack=dns_hijack_result,
+        protection=protection,
     )

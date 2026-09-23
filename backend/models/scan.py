@@ -249,6 +249,21 @@ class DNSHijackScanResult(BaseModel):
     summary: dict
 
 
+class EdgeProtection(BaseModel):
+    """
+    A protection layer observed in front of the site. Informational, never scored.
+
+    evidence says how much was actually seen:
+      challenge - the vendor challenged or blocked our scanner (bot protection is on)
+      rules     - the vendor answered our requests for sensitive paths (firewall rules are on)
+      edge      - traffic is served through the vendor; whether its rules are on is unknown
+    """
+    vendor: str
+    evidence: Literal["challenge", "rules", "edge"]
+    blocked: bool = False          # the site's pages could not be read at all
+    paths: list[str] = []          # sensitive paths the vendor answered (rules evidence)
+
+
 class FullScanResult(BaseModel):
     scan_id: str | None = None
     domain: str
@@ -268,6 +283,7 @@ class FullScanResult(BaseModel):
     # Scanner name -> why its result could not be verified (e.g. a WAF refused the
     # scan). Those scanners are excluded from overall_risk_score.
     unverified: dict[str, str] = {}
+    protection: EdgeProtection | None = None
     paid: bool = False
 
 

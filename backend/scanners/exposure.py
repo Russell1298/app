@@ -296,6 +296,7 @@ async def _probe(
     probe: dict,
     catch_all: bool = False,
     refused: list[str] | None = None,
+    answered_by: dict[str, str] | None = None,
 ) -> ExposureFinding | None:
     url = base_url.rstrip("/") + probe["path"]
     try:
@@ -307,9 +308,12 @@ async def _probe(
 
     # A WAF answer or rate limit says nothing about the path itself: not that it is
     # exposed, and not that the site's own configuration blocks it.
-    if status_code == 429 or waf_vendor(resp):
+    vendor = waf_vendor(resp)
+    if status_code == 429 or vendor:
         if refused is not None:
             refused.append(probe["path"])
+        if vendor and answered_by is not None and probe["severity"] != "info":
+            answered_by[probe["path"]] = vendor
         return None
 
     if status_code == 200:
@@ -400,7 +404,8 @@ async def scan_exposure(domain: str, access: Access | None = None) -> ExposureSc
     async with httpx.AsyncClient(follow_redirects=False, timeout=_TIMEOUT, headers=access.request_headers) as client:
         catch_all = await _detect_catch_all(client, base_url)
         refused: list[str] = []
-        tasks = [_probe(client, base_url, p, catch_all, refused) for p in _PROBES]
+        answered_by: dict[str, str] = {}
+        tasks = [_probe(client, base_url, p, catch_all, refused, answered_by) for p in _PROBES]
         tasks.append(_check_directory_listing(client, base_url))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -467,6 +472,7 @@ async def scan_exposure(domain: str, access: Access | None = None) -> ExposureSc
             # Paths the site's protection answered instead of the site. No claim is
             # made about them either way, so coverage is partial when this is non-empty.
             "waf_refused": sorted(refused),
+            "waf_blocked": dict(sorted(answered_by.items())),
             "exposed": len(exposed),
             "informational": len(info),
             "catch_all_routing": catch_all,

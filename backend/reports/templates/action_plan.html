@@ -133,6 +133,12 @@
 
   .empty-state { margin-top: 26pt; font-size: 11pt; color: var(--ink); }
 
+  /* ── Observed protection (page 1) — context, deliberately not styled as a grade ── */
+  .observed { margin-top: 18pt; padding-top: 9pt; border-top: 0.75pt solid var(--rule); }
+  .observed .label { font-size: 7.5pt; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .observed .label .sep { color: var(--rule); padding: 0 4pt; }
+  .observed p { margin-top: 4pt; font-size: 9.5pt; color: var(--ink); }
+
   /* ── Code / evidence blocks ───────────────────────────── */
   .block { margin-top: 16pt; background: var(--block); padding: 12pt 16pt 14pt 16pt; }
   .block-label {
@@ -312,6 +318,13 @@
         Keep the verification commands from your previous report. Re-run this scan after any change to
         DNS, hosting or checkout.
       </p>
+    {% endif %}
+
+    {% if plan.protection_note %}
+    <div class="observed">
+      <div class="label">Observed<span class="sep">/</span>Not scored</div>
+      <p>{{ plan.protection_note }}</p>
+    </div>
     {% endif %}
 
   {# ── Page 2: first action, in full ───────────────────── #}
